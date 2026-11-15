@@ -20,7 +20,7 @@
   ],
   "languages": [],
   "packs": [],
-  "url": "",
-  "manifest": "",
-  "download": ""
+  "url": "https://github.com/RadSeraph/wod-master-panel",
+  "manifest": "https://raw.githubusercontent.com/RadSeraph/wod-master-panel/main/module.json",
+  "download": "https://github.com/RadSeraph/wod-master-panel/archive/refs/heads/main.zip"
 }
