@@ -17,6 +17,17 @@ const CONFIG = {
     healthPath: "system.health.damage"
 };
 
+function getSavedWindowSize() {
+    const saved = localStorage.getItem("wod-panel-size");
+    if (saved) {
+        try {
+            const size = JSON.parse(saved);
+            return { width: size.width, height: size.height };
+        } catch (e) {}
+    }
+    return { width: 550, height: 700 };
+}
+
 // ==========================================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 // ==========================================
@@ -69,11 +80,19 @@ function getGroupedPowerOptions(actor) {
 // 4. СОЗДАНИЕ РАДИАЛЬНОГО МЕНЮ
 // ==========================================
 Hooks.on("ready", () => {
-    console.log("WoD Master Panel | Инициализация радиального меню...");
+    console.log("WoD Master Panel | Инициализация...");
     
     const container = document.createElement("div");
     container.id = "wod-radial-menu";
-    container.style.cssText = `position: fixed; bottom: 40px; right: 40px; width: 60px; height: 60px; z-index: 9999;`;
+    
+    const savedPos = localStorage.getItem("wod-menu-pos");
+    let posX = savedPos ? JSON.parse(savedPos).x : window.innerWidth - 100;
+    let posY = savedPos ? JSON.parse(savedPos).y : window.innerHeight - 100;
+
+    container.style.cssText = `
+        position: fixed; top: ${posY}px; left: ${posX}px; width: 60px; height: 60px; z-index: 9999;
+        cursor: grab;
+    `;
 
     const mainBtn = document.createElement("div");
     mainBtn.id = "wod-main-btn";
@@ -81,7 +100,7 @@ Hooks.on("ready", () => {
     mainBtn.style.cssText = `
         width: 60px; height: 60px; background: #10b981; color: white; border-radius: 50%;
         display: flex; align-items: center; justify-content: center;
-        font-size: 28px; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+        font-size: 28px; box-shadow: 0 4px 15px rgba(0,0,0,0.6);
         transition: all 0.3s ease; border: 2px solid #34d399; position: relative; z-index: 2;
     `;
 
@@ -91,7 +110,7 @@ Hooks.on("ready", () => {
         subBtn.innerHTML = `<i class="fas ${icon}"></i>`;
         subBtn.title = title;
         subBtn.style.cssText = `
-            position: absolute; width: 45px; height: 45px; background: #0f766e; color: white;
+            position: absolute; top: 7px; left: 7px; width: 45px; height: 45px; background: #0f766e; color: white;
             border-radius: 50%; display: flex; align-items: center; justify-content: center;
             font-size: 20px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.5);
             border: 1px solid #14b8a6; transition: all 0.3s ease;
@@ -114,9 +133,39 @@ Hooks.on("ready", () => {
     container.appendChild(btnDisc);
     document.body.appendChild(container);
 
+    let isDragging = false;
+    let startX, startY, initialX, initialY;
+
+    container.addEventListener("mousedown", (e) => {
+        if (e.target.closest('.wod-sub-btn')) return;
+        isDragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        initialX = container.offsetLeft;
+        initialY = container.offsetTop;
+        container.style.cursor = "grabbing";
+    });
+
+    document.addEventListener("mousemove", (e) => {
+        if (!isDragging) return;
+        e.preventDefault();
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        container.style.left = `${initialX + dx}px`;
+        container.style.top = `${initialY + dy}px`;
+    });
+
+    document.addEventListener("mouseup", () => {
+        if (isDragging) {
+            isDragging = false;
+            container.style.cursor = "grab";
+            localStorage.setItem("wod-menu-pos", JSON.stringify({x: container.offsetLeft, y: container.offsetTop}));
+        }
+    });
+
     let isMenuOpen = false;
     container.addEventListener("mouseenter", () => {
-        if (isMenuOpen) return;
+        if (isMenuOpen || isDragging) return;
         isMenuOpen = true;
         mainBtn.style.transform = "rotate(45deg)";
         mainBtn.style.background = "#059669";
@@ -145,8 +194,9 @@ Hooks.on("ready", () => {
 async function openMainPanel(initialTab = "tab-health") {
     const isGM = game.user.isGM;
     const template = await renderTemplate("modules/wod-master-panel/templates/panel.html", {});
+    const windowSize = getSavedWindowSize();
     
-    new Dialog({
+    const dialog = new Dialog({
         title: "WoD Master Panel",
         content: template,
         buttons: {
@@ -155,7 +205,6 @@ async function openMainPanel(initialTab = "tab-health") {
         },
         render: (html) => { 
             setupPanelLogic(html, isGM); 
-            // Открываем нужную вкладку
             if (initialTab !== "tab-health") {
                 html.find('.wod-tab-btn').removeClass('active');
                 html.find('.wod-tab-content').removeClass('active');
@@ -166,7 +215,23 @@ async function openMainPanel(initialTab = "tab-health") {
                 }
             }
         }
-    }, { width: 550, height: 700, resizable: true }).render(true);
+    }, { width: windowSize.width, height: windowSize.height, resizable: true });
+    
+    dialog.render(true);
+
+    setTimeout(() => {
+        const app = Object.values(ui.windows).find(w => w.title === "WoD Master Panel");
+        if (app) {
+            app.options.closeOnSubmit = false;
+            const originalSetPosition = app.setPosition.bind(app);
+            app.setPosition = function(position) {
+                originalSetPosition(position);
+                if (position.width && position.height) {
+                    localStorage.setItem("wod-panel-size", JSON.stringify({ width: position.width, height: position.height }));
+                }
+            };
+        }
+    }, 100);
 }
 
 // ==========================================
@@ -225,7 +290,6 @@ function setupPanelLogic(html, isGM) {
         html.find('#disc-actor-select').html(actorOptions);
     }
 
-    // Генерация сеток кнопок
     function createGrid(targetId, type, isDamage) {
         let htmlGrid = "";
         if (isDamage) {
@@ -245,7 +309,6 @@ function setupPanelLogic(html, isGM) {
     createGrid('#grid-blood', 'blood', false);
     createGrid('#grid-will', 'will', false);
 
-    // Обработка кликов по кнопкам персонажей
     html.find('.wod-actor-btn').click(function(e) {
         if (isGM) $(this).closest('.wod-tab-content').find('select').val("");
         if ($(this).data('id') === "ALL") {
@@ -258,7 +321,6 @@ function setupPanelLogic(html, isGM) {
         }
     });
 
-    // Клики по сеткам
     html.find('#tab-health .wod-grid-btn').click(function() {
         const type = $(this).data('type'); const val = parseInt($(this).data('val'));
         const useBlood = html.find('#health-use-blood').is(':checked');
@@ -272,7 +334,24 @@ function setupPanelLogic(html, isGM) {
         processResourceAction(html, type, val, npcId, players);
     });
 
-    // Логика вкладки Дисциплины
+    // ЛОГИКА КНОПОК СЛОЖНОСТИ
+    const diffContainer = html.find('#disc-difficulty-buttons');
+    const diffInput = html.find('#disc-difficulty');
+    
+    const renderDifficultyButtons = (currentDiff) => {
+        diffContainer.empty();
+        for (let i = 3; i <= 10; i++) {
+            const isActive = i === currentDiff;
+            const btn = $(`<button type="button" class="wod-diff-btn" data-val="${i}" style="flex: 1; padding: 5px 0; background: ${isActive ? '#2c6b81' : '#1f5c73'}; color: white; border: 1px solid ${isActive ? '#5bb9d6' : '#333'}; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold;">${i}</button>`);
+            btn.click(function() {
+                const val = $(this).data('val');
+                diffInput.val(val);
+                renderDifficultyButtons(val);
+            });
+            diffContainer.append(btn);
+        }
+    };
+
     const updateDiscUI = () => {
         let actorId = isGM ? html.find('#disc-npc-select').val() : html.find('#disc-actor-select').val();
         const actor = game.actors.get(actorId); if (!actor) return;
@@ -287,7 +366,8 @@ function setupPanelLogic(html, isGM) {
 
         let diff = Number(power.system.difficulty);
         if (isNaN(diff) || diff === 0) diff = 6;
-        html.find('#disc-difficulty').val(diff);
+        diffInput.val(diff);
+        renderDifficultyButtons(diff);
 
         let desc = power.system.description || "Нет описания.";
         if (power.system.details) desc += `<hr style="margin: 5px 0; border: 0; border-top: 1px solid #ccc;">` + power.system.details;
@@ -411,7 +491,12 @@ async function processHealthAction(html, type, value, useBlood, npcId, players) 
         let targetName = targets.map(t => t.name).join(', ');
         let bloodText = totalBloodCost > 0 ? ` (потрачено ${totalBloodCost} Крови)` : (value < 0 && !useBlood ? ` (без траты Крови)` : "");
         let chatData = { speaker: ChatMessage.getSpeaker(), content: `<p><strong>${targetName}</strong> ${value > 0 ? "получает" : "лечит"} <strong>${Math.abs(value)}</strong> ${namesMap[type]} урона${bloodText}.</p>` };
-        if (npcId) chatData.whisper = ChatMessage.getWhisperRecipients("GM");
+        
+        if (npcId || !game.user.isGM) {
+            let whisperTargets = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
+            if (!game.user.isGM) whisperTargets.push(game.user.id);
+            chatData.whisper = whisperTargets;
+        }
         ChatMessage.create(chatData);
     }
 }
@@ -437,7 +522,12 @@ async function processResourceAction(html, type, value, npcId, players) {
     }
     if (updatedCount > 0) {
         let chatData = { speaker: ChatMessage.getSpeaker(), content: `<p><strong>${targets.map(t => t.name).join(', ')}</strong> ${value > 0 ? "восстанавливает" : "тратит"} <strong>${Math.abs(value)}</strong> ${config.name}.</p>` };
-        if (npcId) chatData.whisper = ChatMessage.getWhisperRecipients("GM");
+        
+        if (npcId || !game.user.isGM) {
+            let whisperTargets = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
+            if (!game.user.isGM) whisperTargets.push(game.user.id);
+            chatData.whisper = whisperTargets;
+        }
         ChatMessage.create(chatData);
     }
 }
@@ -455,6 +545,7 @@ async function executeDiscipline(html) {
     const customDifficulty = Number(html.find('#disc-difficulty').val()) || 6;
     const useSpeciality = html.find('#disc-use-spec').is(':checked');
     const useWillpower = html.find('#disc-use-will').is(':checked');
+    const isBlind = html.find('#disc-blind-roll').is(':checked');
 
     const inputBloodX = html.find('#input-blood-x'); const inputWillX = html.find('#input-will-x');
     let finalBlood = 0, finalWill = 0;
@@ -489,7 +580,14 @@ async function executeDiscipline(html) {
         let skillValue = skillKey ? (Number(foundry.utils.getProperty(actor, `system.abilities.${skillKey}.value`)) || 0) : 0;
         const pool = attrValue + skillValue;
         if (pool > 0) {
-            const roll = new Roll(`${pool}d10`); await roll.evaluate();
+            const roll = new Roll(`${pool}d10`); 
+            await roll.evaluate();
+
+            // ИНТЕГРАЦИЯ DICE SO NICE
+            if (game.dice3d) {
+                await game.dice3d.showForRoll(roll, game.user, true);
+            }
+
             let succ = 0, ones = 0;
             for (let die of roll.dice[0].results) { if (die.result >= customDifficulty) succ += (die.result === 10 && useSpeciality) ? 2 : 1; if (die.result === 1) ones++; }
             let net = Math.max(0, succ - ones); if (useWillpower) net += 1;
@@ -504,7 +602,17 @@ async function executeDiscipline(html) {
     } else { rollHTML = `<div style="margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.05); border-radius: 5px; text-align: center; font-style: italic; color: #555;">Эта сила не требует броска.</div>`; }
 
     let chatData = { speaker: ChatMessage.getSpeaker({ actor: actor }), content: `<div style="font-family: 'Signika', sans-serif;"><h3 style="margin-top: 0; margin-bottom: 5px; border-bottom: 2px solid #8b0000; padding-bottom: 3px;">${power.name}</h3>${resourceHTML}${rollHTML}<div style="margin-top: 10px; font-size: 0.9em; border-top: 1px solid #ccc; padding-top: 5px;">${power.system.description || ""}${power.system.details || ""}</div></div>` };
-    const players = getPlayerActors();
-    if (!players.some(p => p.id === actor.id)) chatData.whisper = ChatMessage.getWhisperRecipients("GM");
+    
+    if (isBlind) {
+        chatData.blind = true;
+    } else {
+        const players = getPlayerActors();
+        if (!players.some(p => p.id === actor.id) || !isGM) {
+            let whisperTargets = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
+            if (!isGM) whisperTargets.push(game.user.id);
+            chatData.whisper = whisperTargets;
+        }
+    }
+    
     ChatMessage.create(chatData);
 }
