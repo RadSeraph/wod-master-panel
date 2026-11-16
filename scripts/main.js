@@ -1,32 +1,47 @@
-// ==========================================
-// WoD MASTER PANEL - ОСНОВНОЙ СКРИПТ (v14)
-// ==========================================
-
 Hooks.on("ready", () => {
-    console.log("WoD Master Panel | Модуль успешно загружен!");
+    console.log("WOD DIAG | Модуль загружен");
 
     Hooks.on("getSceneControlButtons", (controls) => {
-        console.log("WoD Master Panel | Тест: структура панели - ", controls);
-        
-        // В Foundry v14 панель может называться по-разному. 
-        // Мы проверяем оба популярных варианта: tokens и token.
-        let targetLayer = controls.tokens || controls.token;
+        // 1. Выводим список всех ключей (слоев), которые есть в controls
+        const layerNames = Object.keys(controls);
+        console.log("WOD DIAG | Доступные слои:", layerNames);
 
-        if (targetLayer) {
-            targetLayer.tools["wod-master-panel"] = {
-                name: "wod-master-panel",
-                title: "WoD Master Panel",
-                icon: "fas fa-dice-d10",
-                button: true,
-                onChange: () => {
-                    // Временная заглушка. Если кнопка появится, мы увидим это сообщение.
-                    ui.notifications.info("Кнопка пульта нажата! (Скоро здесь откроется окно)");
-                    console.log("WoD Master Panel | Кнопка нажата!");
-                }
-            };
-            console.log("WoD Master Panel | Кнопка успешно добавлена в слой!");
-        } else {
-            console.error("WoD Master Panel | ОШИБКА: Не найден слой токенов. Проверьте названия слоев выше.");
+        // 2. Проверяем, есть ли слои tokens или token
+        let targetKey = null;
+        if (controls.tokens) targetKey = "tokens";
+        else if (controls.token) targetKey = "token";
+
+        if (!targetKey) {
+            console.error("WOD DIAG | Слой токенов НЕ НАЙДЕН! Смотрите список слоев выше.");
+            return;
         }
+
+        console.log(`WOD DIAG | Использую слой: ${targetKey}`);
+
+        // 3. Пытаемся добавить кнопку с обязательным activeTool (заглушка)
+        const layer = controls[targetKey];
+        
+        // Проверяем, есть ли уже tools
+        if (!layer.tools) layer.tools = {};
+
+        // Добавляем кнопку
+        layer.tools["wod-test-btn"] = {
+            name: "wod-test-btn",
+            title: "WoD Test Button",
+            icon: "fas fa-dice-d10",
+            button: true,
+            onChange: () => {
+                ui.notifications.info("Тестовая кнопка нажата!");
+                console.log("WOD DIAG | Кнопка нажата!");
+            }
+        };
+
+        // Если в слое нет activeTool, устанавливаем его принудительно
+        if (!layer.activeTool) {
+            layer.activeTool = "wod-test-btn";
+            console.log("WOD DIAG | Принудительно установлен activeTool");
+        }
+
+        console.log("WOD DIAG | Кнопка добавлена в tools слоя " + targetKey);
     });
 });
