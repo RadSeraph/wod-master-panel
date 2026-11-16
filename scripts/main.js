@@ -105,7 +105,7 @@ async function openMainPanel() {
             }
         },
         render: (html) => { setupPanelLogic(html, isGM); }
-    }, { width: 550, height: 650, resizable: true }).render(true); // Высоту уменьшили до 650
+    }, { width: 550, height: 720, resizable: true }).render(true); // Высоту уменьшили до 650
 }
 
 // ==========================================
