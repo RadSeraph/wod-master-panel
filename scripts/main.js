@@ -64,22 +64,23 @@ function getGroupedPowerOptions(actor) {
 }
 
 // ==========================================
-// 3. ИНИЦИАЛИЗАЦИЯ (ХУКИ)
+// 3. ИНИЦИАЛИЗАЦИЯ (ХУКИ ДЛЯ V14)
 // ==========================================
 Hooks.on("ready", () => {
-    console.log("WoD Master Panel | Инициализация...");
+    console.log("WoD Master Panel | Инициализация (v14)...");
 
-    // Добавляем кнопку на панель управления сценой (Token Controls)
+    // В Foundry v14 панель инструментов - это объект, а не массив.
     Hooks.on("getSceneControlButtons", (controls) => {
-        const tokenControls = controls.find(c => c.name === "token");
-        if (tokenControls) {
-            tokenControls.tools.push({
-                name: "wod-panel",
+        // Проверяем наличие группы "tokens" (слой токенов)
+        if (controls.tokens) {
+            // Добавляем нашу кнопку в объект tools
+            controls.tokens.tools["wod-master-panel"] = {
+                name: "wod-master-panel",
                 title: "WoD Master Panel",
-                icon: "fas fa-dice-d20",
+                icon: "fas fa-dice-d10",
                 button: true,
-                onClick: () => openMainPanel()
-            });
+                onChange: () => openMainPanel() // В v14 используется onChange
+            };
         }
     });
 });
@@ -89,6 +90,7 @@ Hooks.on("ready", () => {
 // ==========================================
 async function openMainPanel() {
     const isGM = game.user.isGM;
+    // Загружаем наш HTML-шаблон
     const template = await renderTemplate("modules/wod-master-panel/templates/panel.html", {});
     
     new Dialog({
@@ -111,14 +113,13 @@ async function openMainPanel() {
 // 5. ЛОГИКА ПАНЕЛИ
 // ==========================================
 function setupPanelLogic(html, isGM) {
-    // --- Переключение вкладок ---
+    // Переключение вкладок
     html.find('.wod-tab-btn').click(function() {
         html.find('.wod-tab-btn').removeClass('active');
         html.find('.wod-tab-content').removeClass('active');
         $(this).addClass('active');
         html.find('#' + $(this).data('tab')).addClass('active');
         
-        // Скрываем/Показываем кнопку Использовать в зависимости от вкладки
         const dialogButtons = html.closest('.dialog').find('.dialog-buttons');
         if ($(this).data('tab') === 'tab-disciplines') {
             dialogButtons.find('.useDisc').show();
@@ -127,7 +128,6 @@ function setupPanelLogic(html, isGM) {
         }
     });
 
-    // --- Заполнение списков ---
     const players = getPlayerActors();
     const npcs = getNPCActors();
 
@@ -162,14 +162,14 @@ function setupPanelLogic(html, isGM) {
         actorsWithPowers.forEach(n => discOptions += `<option value="${n.id}">${n.name}</option>`);
         html.find('#disc-npc-select').html(discOptions);
         html.find('#disc-npc-block').show();
-        html.find('#disc-actor-block').hide(); // Скрываем выбор игроков для ГМа
+        html.find('#disc-actor-block').hide();
     } else {
         let actorOptions = "";
         players.filter(a => a.items.some(i => i.type === "Power" && i.system.level > 0)).forEach(a => actorOptions += `<option value="${a.id}">${a.name}</option>`);
         html.find('#disc-actor-select').html(actorOptions);
     }
 
-    // --- Генерация кнопок урона и ресурсов ---
+    // Генерация сеток кнопок
     function createGrid(targetId, type, isDamage) {
         let htmlGrid = "";
         if (isDamage) {
@@ -189,14 +189,9 @@ function setupPanelLogic(html, isGM) {
     createGrid('#grid-blood', 'blood', false);
     createGrid('#grid-will', 'will', false);
 
-    // --- Обработка кликов по кнопкам персонажей (мультивыбор) ---
+    // Обработка кликов по кнопкам персонажей
     html.find('.wod-actor-btn').click(function(e) {
-        // Сброс NPC при клике на игрока
-        if (isGM) {
-            const parentTab = $(this).closest('.wod-tab-content');
-            parentTab.find('select').val("");
-        }
-
+        if (isGM) $(this).closest('.wod-tab-content').find('select').val("");
         if ($(this).data('id') === "ALL") {
             const isActive = $(this).hasClass('active');
             $(this).closest('.wod-tab-content').find('.wod-actor-btn').removeClass('active');
@@ -207,7 +202,7 @@ function setupPanelLogic(html, isGM) {
         }
     });
 
-    // --- Обработка кликов по сеткам Здоровья ---
+    // Клики по сеткам
     html.find('#tab-health .wod-grid-btn').click(function() {
         const type = $(this).data('type');
         const val = parseInt($(this).data('val'));
@@ -216,7 +211,6 @@ function setupPanelLogic(html, isGM) {
         processHealthAction(html, type, val, useBlood, npcId, players);
     });
 
-    // --- Обработка кликов по сеткам Ресурсов ---
     html.find('#tab-resources .wod-grid-btn').click(function() {
         const type = $(this).data('type');
         const val = parseInt($(this).data('val'));
@@ -224,7 +218,7 @@ function setupPanelLogic(html, isGM) {
         processResourceAction(html, type, val, npcId, players);
     });
 
-    // --- Логика вкладки Дисциплины ---
+    // Логика вкладки Дисциплины
     const updateDiscUI = () => {
         let actorId = isGM ? html.find('#disc-npc-select').val() : html.find('#disc-actor-select').val();
         const actor = game.actors.get(actorId);
@@ -242,17 +236,14 @@ function setupPanelLogic(html, isGM) {
         const power = actor.items.get(html.find('#disc-power-select').val());
         if (!power) return;
 
-        // Сложность
         let diff = Number(power.system.difficulty);
         if (isNaN(diff) || diff === 0) diff = 6;
         html.find('#disc-difficulty').val(diff);
 
-        // Описание
         let desc = power.system.description || "Нет описания.";
         if (power.system.details) desc += `<hr style="margin: 5px 0; border: 0; border-top: 1px solid #ccc;">` + power.system.details;
         html.find('#disc-description').html(desc);
 
-        // Специализация
         const skillKey = power.system.dice2;
         if (skillKey) {
             const skill = foundry.utils.getProperty(actor, `system.abilities.${skillKey}`);
@@ -266,7 +257,6 @@ function setupPanelLogic(html, isGM) {
             html.find('#disc-spec-block').hide();
         }
         html.find('#disc-use-spec').prop('checked', false);
-
         updateFinalDiscCost(actor, power);
     };
 
@@ -297,7 +287,6 @@ function setupPanelLogic(html, isGM) {
         } else {
             html.find('#disc-req-block').hide();
         }
-        
         updateFinalCostDisplay(actor, power);
     };
 
@@ -315,7 +304,6 @@ function setupPanelLogic(html, isGM) {
         if (willMatch) {
             wCost = willMatch[1].toLowerCase() === "x" ? (Number(html.find('#input-will-x').val()) || 0) : Number(willMatch[1]);
         }
-
         if (html.find('#disc-use-will').is(':checked')) wCost += 1;
 
         let parts = [];
@@ -329,7 +317,6 @@ function setupPanelLogic(html, isGM) {
         }
     };
 
-    // Слушатели для Дисциплин
     if (isGM) html.find('#disc-npc-select').change(updateDiscUI);
     else html.find('#disc-actor-select').change(updateDiscUI);
     html.find('#disc-power-select').change(updatePowerDetails);
@@ -339,9 +326,238 @@ function setupPanelLogic(html, isGM) {
         if (actor) updateFinalCostDisplay(actor, actor.items.get(html.find('#disc-power-select').val()));
     });
 
-    // Инициализация вкладки Дисциплины
     updateDiscUI();
-    
-    // Изначально скрываем кнопку "Использовать", так как открыта вкладка Здоровья
     html.closest('.dialog').find('.dialog-buttons').find('.useDisc').hide();
+}
+
+// ==========================================
+// 6. ФУНКЦИИ ОБРАБОТКИ (УРОН, РЕСУРСЫ, БРОСКИ)
+// ==========================================
+async function processHealthAction(html, type, value, useBlood, npcId, players) {
+    let targets = [];
+    if (npcId) {
+        targets = [game.actors.get(npcId)];
+    } else {
+        const activeBtns = html.find('.wod-tab-content.active .wod-actor-btn.active');
+        if (activeBtns.length === 0) return ui.notifications.warn("Выберите персонажа или NPC!");
+        if (html.find('.wod-actor-btn[data-id="ALL"].active').length > 0) {
+            targets = players;
+        } else {
+            activeBtns.each(function() { targets.push(game.actors.get($(this).data('id'))); });
+        }
+    }
+
+    const namesMap = { bashing: "Дробящий", lethal: "Летальный", aggravated: "Аггравированный" };
+    let updatedCount = 0;
+    let totalBloodCost = 0;
+
+    for (const actor of targets) {
+        if (!actor) continue;
+        const current = foundry.utils.getProperty(actor, CONFIG.healthPath);
+        if (!current) continue;
+
+        let b = Number(current.bashing) || 0;
+        let l = Number(current.lethal) || 0;
+        let a = Number(current.aggravated) || 0;
+        let bloodCost = 0;
+
+        if (value > 0) {
+            if (type === "bashing") b += value;
+            else if (type === "lethal") {
+                const availableBashing = Math.min(value, b);
+                b -= availableBashing;
+                l += value;
+            } else if (type === "aggravated") {
+                const availableBashing = Math.min(value, b);
+                b -= availableBashing;
+                const availableLethal = Math.min(value - availableBashing, l);
+                l -= availableLethal;
+                a += value;
+            }
+        } else {
+            const healAmount = Math.abs(value);
+            if (type === "aggravated") { const h = Math.min(a, healAmount); bloodCost = h * 5; a -= h; }
+            else if (type === "lethal") { const h = Math.min(l, healAmount); bloodCost = h * 1; l -= h; }
+            else if (type === "bashing") { const h = Math.min(b, healAmount); bloodCost = h * 1; b -= h; }
+        }
+
+        let total = b + l + a;
+        if (total > 7) {
+            if (type === "bashing") b = Math.max(0, 7 - l - a);
+            else if (type === "lethal") l = Math.max(0, 7 - b - a);
+            else if (type === "aggravated") a = Math.max(0, 7 - b - l);
+        }
+
+        let canUpdate = true;
+        if (bloodCost > 0 && useBlood) {
+            const curBlood = foundry.utils.getProperty(actor, CONFIG.bloodPath);
+            if (curBlood !== undefined) {
+                const bNum = Number(curBlood) || 0;
+                if (bNum < bloodCost) { ui.notifications.warn(`${actor.name}: мало Крови!`); canUpdate = false; }
+                else { await actor.update({ [CONFIG.bloodPath]: bNum - bloodCost }); totalBloodCost += bloodCost; }
+            }
+        }
+
+        if (canUpdate && (b !== current.bashing || l !== current.lethal || a !== current.aggravated)) {
+            await actor.update({ 
+                [`${CONFIG.healthPath}.bashing`]: b,
+                [`${CONFIG.healthPath}.lethal`]: l,
+                [`${CONFIG.healthPath}.aggravated`]: a
+            });
+            updatedCount++;
+        }
+    }
+
+    if (updatedCount > 0 || targets.length > 0) {
+        let targetName = targets.map(t => t.name).join(', ');
+        let actionWord = value > 0 ? "получает" : "лечит";
+        let absValue = Math.abs(value);
+        let bloodText = totalBloodCost > 0 ? ` (потрачено ${totalBloodCost} Крови)` : (value < 0 && !useBlood ? ` (без траты Крови)` : "");
+        const isSecret = npcId !== "";
+        let chatData = { speaker: ChatMessage.getSpeaker(), content: `<p><strong>${targetName}</strong> ${actionWord} <strong>${absValue}</strong> ${namesMap[type]} урона${bloodText}.</p>` };
+        if (isSecret) chatData.whisper = ChatMessage.getWhisperRecipients("GM");
+        ChatMessage.create(chatData);
+    }
+}
+
+async function processResourceAction(html, type, value, npcId, players) {
+    let targets = [];
+    if (npcId) {
+        targets = [game.actors.get(npcId)];
+    } else {
+        const activeBtns = html.find('.wod-tab-content.active .wod-actor-btn.active');
+        if (activeBtns.length === 0) return ui.notifications.warn("Выберите персонажа или NPC!");
+        if (html.find('.wod-actor-btn[data-id="ALL"].active').length > 0) {
+            targets = players;
+        } else {
+            activeBtns.each(function() { targets.push(game.actors.get($(this).data('id'))); });
+        }
+    }
+
+    const paths = {
+        blood: { path: CONFIG.bloodPath, max: CONFIG.bloodMax, name: "Кровь" },
+        will:  { path: CONFIG.willPath, max: CONFIG.willMax, name: "Волю" }
+    };
+
+    const config = paths[type];
+    let updatedCount = 0;
+
+    for (const actor of targets) {
+        if (!actor) continue;
+        const current = foundry.utils.getProperty(actor, config.path);
+        if (current === undefined) continue; // Пропускаем, если нет такого ресурса
+
+        const max = foundry.utils.getProperty(actor, config.max) || 10;
+        let newValue = current + value;
+        if (newValue < 0) newValue = 0;
+        if (newValue > max) newValue = max;
+
+        if (newValue !== current) {
+            await actor.update({ [config.path]: newValue });
+            updatedCount++;
+        }
+    }
+
+    if (updatedCount > 0) {
+        let targetName = targets.map(t => t.name).join(', ');
+        let actionWord = value > 0 ? "восстанавливает" : "тратит";
+        const isSecret = npcId !== "";
+        let chatData = { speaker: ChatMessage.getSpeaker(), content: `<p><strong>${targetName}</strong> ${actionWord} <strong>${Math.abs(value)}</strong> ${config.name}.</p>` };
+        if (isSecret) chatData.whisper = ChatMessage.getWhisperRecipients("GM");
+        ChatMessage.create(chatData);
+    }
+}
+
+async function executeDiscipline(html) {
+    const isGM = game.user.isGM;
+    let actorId = isGM ? html.find('#disc-npc-select').val() : html.find('#disc-actor-select').val();
+    if (!actorId && isGM) actorId = game.actors.contents.find(a => a.items.some(i => i.type === "Power" && i.system.level > 0))?.id; // fallback
+    if (!actorId) return ui.notifications.error("Выберите персонажа!");
+
+    const actor = game.actors.get(actorId);
+    const powerId = html.find('#disc-power-select').val();
+    const power = actor.items.get(powerId);
+    if (!power) return;
+
+    const customDifficulty = Number(html.find('#disc-difficulty').val()) || 6;
+    const useSpeciality = html.find('#disc-use-spec').is(':checked');
+    const useWillpower = html.find('#disc-use-will').is(':checked');
+
+    const inputBloodX = html.find('#input-blood-x');
+    const inputWillX = html.find('#input-will-x');
+    
+    let finalBlood = 0;
+    let finalWill = 0;
+
+    const textToScan = ((power.system.description || "") + " " + (power.system.details || "")).toLowerCase();
+    const bloodMatch = textToScan.match(/(\d+|x)\s*(?:bp|blood\s*points?|пункт[а-я]*\s*кров[а-я]*)/i);
+    const willMatch = textToScan.match(/(\d+|x)\s*(?:wp|willpower\s*points?|пункт[а-я]*\s*вол[а-я]*)/i);
+
+    if (bloodMatch) {
+        if (bloodMatch[1].toLowerCase() === "x" && inputBloodX.length) finalBlood = parseInt(inputBloodX.val()) || 1;
+        else finalBlood = parseInt(bloodMatch[1]);
+    }
+    if (willMatch) {
+        if (willMatch[1].toLowerCase() === "x" && inputWillX.length) finalWill = parseInt(inputWillX.val()) || 1;
+        else finalWill = parseInt(willMatch[1]);
+    }
+    if (useWillpower) finalWill += 1; 
+
+    // Трата ресурсов
+    let resourceHTML = "";
+    if (finalBlood > 0) {
+        const curB = Number(foundry.utils.getProperty(actor, CONFIG.bloodPath)) || 0;
+        if (curB < finalBlood) return ui.notifications.error(`${actor.name}: мало Крови!`);
+        await actor.update({ [CONFIG.bloodPath]: curB - finalBlood });
+        resourceHTML += `<p style="color: #8b0000; margin: 2px 0;"><em>Потрачено ${finalBlood} Крови (осталось ${curB - finalBlood}).</em></p>`;
+    }
+    if (finalWill > 0) {
+        const curW = Number(foundry.utils.getProperty(actor, CONFIG.willPath)) || 0;
+        if (curW < finalWill) return ui.notifications.error(`${actor.name}: мало Воли!`);
+        await actor.update({ [CONFIG.willPath]: curW - finalWill });
+        resourceHTML += `<p style="color: #00008b; margin: 2px 0;"><em>Потрачено ${finalWill} Воли (осталось ${curW - finalWill}).</em></p>`;
+    }
+
+    // Бросок
+    let rollHTML = "";
+    if (power.system.dice1) {
+        const attrKey = power.system.dice1;
+        const skillKey = power.system.dice2;
+        let attrValue = attrKey === "willpower" ? (Number(foundry.utils.getProperty(actor, CONFIG.willPerm)) || 0) : (Number(foundry.utils.getProperty(actor, `system.attributes.${attrKey}.total`)) || 0);
+        let skillValue = skillKey ? (Number(foundry.utils.getProperty(actor, `system.abilities.${skillKey}.value`)) || 0) : 0;
+        
+        const pool = attrValue + skillValue;
+        if (pool > 0) {
+            const roll = new Roll(`${pool}d10`);
+            await roll.evaluate();
+            let successes = 0, ones = 0;
+            for (let die of roll.dice[0].results) {
+                if (die.result >= customDifficulty) successes += (die.result === 10 && useSpeciality) ? 2 : 1;
+                if (die.result === 1) ones++;
+            }
+            let netSuccesses = Math.max(0, successes - ones);
+            if (useWillpower) netSuccesses += 1;
+
+            const diceHTML = roll.dice[0].results.map(d => {
+                let color = d.result >= customDifficulty ? "#4caf50" : (d.result === 1 ? "#f44336" : "#ccc");
+                if (d.result === 10 && useSpeciality) color = "#ffd700";
+                return `<span style="display: inline-block; width: 24px; height: 24px; line-height: 24px; text-align: center; background: #222; color: ${color}; border: 1px solid ${color}; border-radius: 4px; margin: 2px; font-weight: bold;">${d.result}</span>`;
+            }).join("");
+
+            let wpText = useWillpower ? `<br><span style="color: #00008b; font-weight: bold;">+1 автоуспех (Воля)</span>` : "";
+            rollHTML = `<div style="margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.05); border-radius: 5px; text-align: center;"><div style="margin-bottom: 5px;">Пул: <strong>${pool}d10</strong> (Сложность: ${customDifficulty})</div><div>${diceHTML}</div><div style="margin-top: 5px; font-size: 1.1em;">Успехи: <strong style="color: #2e6b4e;">${netSuccesses}</strong>${wpText}</div></div>`;
+        }
+    } else {
+        rollHTML = `<div style="margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.05); border-radius: 5px; text-align: center; font-style: italic; color: #555;">Эта сила не требует броска.</div>`;
+    }
+
+    let chatData = {
+        speaker: ChatMessage.getSpeaker({ actor: actor }),
+        content: `<div style="font-family: 'Signika', sans-serif;"><h3 style="margin-top: 0; margin-bottom: 5px; border-bottom: 2px solid #8b0000; padding-bottom: 3px;">${power.name}</h3>${resourceHTML}${rollHTML}<div style="margin-top: 10px; font-size: 0.9em; border-top: 1px solid #ccc; padding-top: 5px;">${power.system.description || ""}${power.system.details || ""}</div></div>`
+    };
+    
+    // Если это NPC, отправляем шепотом
+    const players = getPlayerActors();
+    if (!players.some(p => p.id === actor.id)) chatData.whisper = ChatMessage.getWhisperRecipients("GM");
+    ChatMessage.create(chatData);
 }
