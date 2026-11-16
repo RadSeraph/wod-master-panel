@@ -152,3 +152,7 @@
     color: #222;
     flex-shrink: 0;
 }
+#wod-radial-menu .wod-sub-btn:hover {
+    background: #14b8a6 !important;
+    transform: scale(1.15) !important;
+}
