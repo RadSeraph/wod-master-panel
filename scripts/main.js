@@ -69,9 +69,8 @@ function getGroupedPowerOptions(actor) {
 // 4. СОЗДАНИЕ КНОПКИ (ИНИЦИАЛИЗАЦИЯ)
 // ==========================================
 Hooks.on("ready", () => {
-    console.log("WoD Master Panel | Инициализация (v14)...");
+    console.log("WoD Master Panel | Инициализация...");
     
-    // Создаем кнопку
     const btn = document.createElement("div");
     btn.id = "wod-floating-btn";
     btn.innerHTML = '<i class="fas fa-dice-d10"></i>';
@@ -106,7 +105,7 @@ async function openMainPanel() {
             }
         },
         render: (html) => { setupPanelLogic(html, isGM); }
-    }, { width: 550, height: 700, resizable: true }).render(true);
+    }, { width: 550, height: 650, resizable: true }).render(true); // Высоту уменьшили до 650
 }
 
 // ==========================================
@@ -260,12 +259,17 @@ function setupPanelLogic(html, isGM) {
         updateFinalDiscCost(actor, power);
     };
 
+    // ОБНОВЛЕННАЯ ЛОГИКА ПРОВЕРКИ ТРАТ
     const updateFinalDiscCost = (actor, power) => {
         const textToScan = ((power.system.description || "") + " " + (power.system.details || "")).toLowerCase();
         const bloodMatch = textToScan.match(/(\d+|x)\s*(?:bp|blood\s*points?|пункт[а-я]*\s*кров[а-я]*)/i);
         const willMatch = textToScan.match(/(\d+|x)\s*(?:wp|willpower\s*points?|пункт[а-я]*\s*вол[а-я]*)/i);
 
         let reqHTML = "";
+        // Проверка 1: Галочка spendblood (если в тексте ничего нет, но галочка стоит)
+        if (power.system.spendblood === true && !bloodMatch) {
+            reqHTML += `<div style="color: #8b0000; margin-bottom: 5px;">• Требуется Кровь: 1 bp (свойство предмета)</div>`;
+        }
         if (bloodMatch) {
             if (bloodMatch[1].toLowerCase() === "x") {
                 reqHTML += `<div style="color: #8b0000; margin-bottom: 5px; display: flex; align-items: center;"><span style="margin-right: 10px;">Требуется Кровь (bp):</span><input type="number" id="input-blood-x" value="1" min="0" style="width: 50px; padding: 2px; border: 1px solid #999; border-radius: 3px; color: #000;"></div>`;
@@ -298,12 +302,9 @@ function setupPanelLogic(html, isGM) {
         let bCost = 0;
         let wCost = 0;
 
-        if (bloodMatch) {
-            bCost = bloodMatch[1].toLowerCase() === "x" ? (Number(html.find('#input-blood-x').val()) || 0) : Number(bloodMatch[1]);
-        }
-        if (willMatch) {
-            wCost = willMatch[1].toLowerCase() === "x" ? (Number(html.find('#input-will-x').val()) || 0) : Number(willMatch[1]);
-        }
+        if (power.system.spendblood === true && !bloodMatch) bCost = 1; // Трата по галочке
+        if (bloodMatch) bCost = bloodMatch[1].toLowerCase() === "x" ? (Number(html.find('#input-blood-x').val()) || 0) : Number(bloodMatch[1]);
+        if (willMatch) wCost = willMatch[1].toLowerCase() === "x" ? (Number(html.find('#input-will-x').val()) || 0) : Number(willMatch[1]);
         if (html.find('#disc-use-will').is(':checked')) wCost += 1;
 
         let parts = [];
@@ -331,139 +332,87 @@ function setupPanelLogic(html, isGM) {
 }
 
 // ==========================================
-// 7. ФУНКЦИИ ОБРАБОТКИ (УРОН, РЕСУРСЫ, БРОСКИ)
+// 7. ФУНКЦИИ ОБРАБОТКИ
 // ==========================================
 async function processHealthAction(html, type, value, useBlood, npcId, players) {
+    // (Код здоровья оставлен без изменений)
     let targets = [];
-    if (npcId) {
-        targets = [game.actors.get(npcId)];
-    } else {
+    if (npcId) { targets = [game.actors.get(npcId)]; } else {
         const activeBtns = html.find('.wod-tab-content.active .wod-actor-btn.active');
-        if (activeBtns.length === 0) return ui.notifications.warn("Выберите персонажа или NPC!");
-        if (html.find('.wod-actor-btn[data-id="ALL"].active').length > 0) {
-            targets = players;
-        } else {
+        if (activeBtns.length === 0) return ui.notifications.warn("Выберите персонажа!");
+        if (html.find('.wod-actor-btn[data-id="ALL"].active').length > 0) { targets = players; } else {
             activeBtns.each(function() { targets.push(game.actors.get($(this).data('id'))); });
         }
     }
-
     const namesMap = { bashing: "Дробящий", lethal: "Летальный", aggravated: "Аггравированный" };
-    let updatedCount = 0;
-    let totalBloodCost = 0;
-
+    let updatedCount = 0, totalBloodCost = 0;
     for (const actor of targets) {
         if (!actor) continue;
         const current = foundry.utils.getProperty(actor, CONFIG.healthPath);
         if (!current) continue;
-
-        let b = Number(current.bashing) || 0;
-        let l = Number(current.lethal) || 0;
-        let a = Number(current.aggravated) || 0;
-        let bloodCost = 0;
-
+        let b = Number(current.bashing) || 0, l = Number(current.lethal) || 0, a = Number(current.aggravated) || 0, bloodCost = 0;
         if (value > 0) {
             if (type === "bashing") b += value;
-            else if (type === "lethal") {
-                const availableBashing = Math.min(value, b);
-                b -= availableBashing;
-                l += value;
-            } else if (type === "aggravated") {
-                const availableBashing = Math.min(value, b);
-                b -= availableBashing;
-                const availableLethal = Math.min(value - availableBashing, l);
-                l -= availableLethal;
-                a += value;
-            }
+            else if (type === "lethal") { const ab = Math.min(value, b); b -= ab; l += value; }
+            else if (type === "aggravated") { const ab = Math.min(value, b); b -= ab; const al = Math.min(value - ab, l); l -= al; a += value; }
         } else {
-            const healAmount = Math.abs(value);
-            if (type === "aggravated") { const h = Math.min(a, healAmount); bloodCost = h * 5; a -= h; }
-            else if (type === "lethal") { const h = Math.min(l, healAmount); bloodCost = h * 1; l -= h; }
-            else if (type === "bashing") { const h = Math.min(b, healAmount); bloodCost = h * 1; b -= h; }
+            const h = Math.abs(value);
+            if (type === "aggravated") { const ah = Math.min(a, h); bloodCost = ah * 5; a -= ah; }
+            else if (type === "lethal") { const ah = Math.min(l, h); bloodCost = ah * 1; l -= ah; }
+            else if (type === "bashing") { const ah = Math.min(b, h); bloodCost = ah * 1; b -= ah; }
         }
-
         let total = b + l + a;
         if (total > 7) {
             if (type === "bashing") b = Math.max(0, 7 - l - a);
             else if (type === "lethal") l = Math.max(0, 7 - b - a);
             else if (type === "aggravated") a = Math.max(0, 7 - b - l);
         }
-
         let canUpdate = true;
         if (bloodCost > 0 && useBlood) {
-            const curBlood = foundry.utils.getProperty(actor, CONFIG.bloodPath);
-            if (curBlood !== undefined) {
-                const bNum = Number(curBlood) || 0;
+            const curB = foundry.utils.getProperty(actor, CONFIG.bloodPath);
+            if (curB !== undefined) {
+                const bNum = Number(curB) || 0;
                 if (bNum < bloodCost) { ui.notifications.warn(`${actor.name}: мало Крови!`); canUpdate = false; }
                 else { await actor.update({ [CONFIG.bloodPath]: bNum - bloodCost }); totalBloodCost += bloodCost; }
             }
         }
-
         if (canUpdate && (b !== current.bashing || l !== current.lethal || a !== current.aggravated)) {
-            await actor.update({ 
-                [`${CONFIG.healthPath}.bashing`]: b,
-                [`${CONFIG.healthPath}.lethal`]: l,
-                [`${CONFIG.healthPath}.aggravated`]: a
-            });
+            await actor.update({ [`${CONFIG.healthPath}.bashing`]: b, [`${CONFIG.healthPath}.lethal`]: l, [`${CONFIG.healthPath}.aggravated`]: a });
             updatedCount++;
         }
     }
-
     if (updatedCount > 0 || targets.length > 0) {
         let targetName = targets.map(t => t.name).join(', ');
-        let actionWord = value > 0 ? "получает" : "лечит";
-        let absValue = Math.abs(value);
         let bloodText = totalBloodCost > 0 ? ` (потрачено ${totalBloodCost} Крови)` : (value < 0 && !useBlood ? ` (без траты Крови)` : "");
-        const isSecret = npcId !== "";
-        let chatData = { speaker: ChatMessage.getSpeaker(), content: `<p><strong>${targetName}</strong> ${actionWord} <strong>${absValue}</strong> ${namesMap[type]} урона${bloodText}.</p>` };
-        if (isSecret) chatData.whisper = ChatMessage.getWhisperRecipients("GM");
+        let chatData = { speaker: ChatMessage.getSpeaker(), content: `<p><strong>${targetName}</strong> ${value > 0 ? "получает" : "лечит"} <strong>${Math.abs(value)}</strong> ${namesMap[type]} урона${bloodText}.</p>` };
+        if (npcId) chatData.whisper = ChatMessage.getWhisperRecipients("GM");
         ChatMessage.create(chatData);
     }
 }
 
 async function processResourceAction(html, type, value, npcId, players) {
     let targets = [];
-    if (npcId) {
-        targets = [game.actors.get(npcId)];
-    } else {
+    if (npcId) { targets = [game.actors.get(npcId)]; } else {
         const activeBtns = html.find('.wod-tab-content.active .wod-actor-btn.active');
-        if (activeBtns.length === 0) return ui.notifications.warn("Выберите персонажа или NPC!");
-        if (html.find('.wod-actor-btn[data-id="ALL"].active').length > 0) {
-            targets = players;
-        } else {
+        if (activeBtns.length === 0) return ui.notifications.warn("Выберите персонажа!");
+        if (html.find('.wod-actor-btn[data-id="ALL"].active').length > 0) { targets = players; } else {
             activeBtns.each(function() { targets.push(game.actors.get($(this).data('id'))); });
         }
     }
-
-    const paths = {
-        blood: { path: CONFIG.bloodPath, max: CONFIG.bloodMax, name: "Кровь" },
-        will:  { path: CONFIG.willPath, max: CONFIG.willMax, name: "Волю" }
-    };
-
+    const paths = { blood: { path: CONFIG.bloodPath, max: CONFIG.bloodMax, name: "Кровь" }, will: { path: CONFIG.willPath, max: CONFIG.willMax, name: "Волю" } };
     const config = paths[type];
     let updatedCount = 0;
-
     for (const actor of targets) {
         if (!actor) continue;
         const current = foundry.utils.getProperty(actor, config.path);
-        if (current === undefined) continue; // Пропускаем, если нет такого ресурса
-
+        if (current === undefined) continue;
         const max = foundry.utils.getProperty(actor, config.max) || 10;
-        let newValue = current + value;
-        if (newValue < 0) newValue = 0;
-        if (newValue > max) newValue = max;
-
-        if (newValue !== current) {
-            await actor.update({ [config.path]: newValue });
-            updatedCount++;
-        }
+        let newValue = Math.max(0, Math.min(max, current + value));
+        if (newValue !== current) { await actor.update({ [config.path]: newValue }); updatedCount++; }
     }
-
     if (updatedCount > 0) {
-        let targetName = targets.map(t => t.name).join(', ');
-        let actionWord = value > 0 ? "восстанавливает" : "тратит";
-        const isSecret = npcId !== "";
-        let chatData = { speaker: ChatMessage.getSpeaker(), content: `<p><strong>${targetName}</strong> ${actionWord} <strong>${Math.abs(value)}</strong> ${config.name}.</p>` };
-        if (isSecret) chatData.whisper = ChatMessage.getWhisperRecipients("GM");
+        let chatData = { speaker: ChatMessage.getSpeaker(), content: `<p><strong>${targets.map(t => t.name).join(', ')}</strong> ${value > 0 ? "восстанавливает" : "тратит"} <strong>${Math.abs(value)}</strong> ${config.name}.</p>` };
+        if (npcId) chatData.whisper = ChatMessage.getWhisperRecipients("GM");
         ChatMessage.create(chatData);
     }
 }
@@ -486,17 +435,18 @@ async function executeDiscipline(html) {
     const inputBloodX = html.find('#input-blood-x');
     const inputWillX = html.find('#input-will-x');
     
-    let finalBlood = 0;
-    let finalWill = 0;
+    let finalBlood = 0, finalWill = 0;
 
     const textToScan = ((power.system.description || "") + " " + (power.system.details || "")).toLowerCase();
     const bloodMatch = textToScan.match(/(\d+|x)\s*(?:bp|blood\s*points?|пункт[а-я]*\s*кров[а-я]*)/i);
     const willMatch = textToScan.match(/(\d+|x)\s*(?:wp|willpower\s*points?|пункт[а-я]*\s*вол[а-я]*)/i);
 
-    if (bloodMatch) {
+    if (power.system.spendblood === true && !bloodMatch) finalBlood = 1; // Трата по галочке
+    else if (bloodMatch) {
         if (bloodMatch[1].toLowerCase() === "x" && inputBloodX.length) finalBlood = parseInt(inputBloodX.val()) || 1;
         else finalBlood = parseInt(bloodMatch[1]);
     }
+    
     if (willMatch) {
         if (willMatch[1].toLowerCase() === "x" && inputWillX.length) finalWill = parseInt(inputWillX.val()) || 1;
         else finalWill = parseInt(willMatch[1]);
@@ -519,41 +469,29 @@ async function executeDiscipline(html) {
 
     let rollHTML = "";
     if (power.system.dice1) {
-        const attrKey = power.system.dice1;
-        const skillKey = power.system.dice2;
+        const attrKey = power.system.dice1, skillKey = power.system.dice2;
         let attrValue = attrKey === "willpower" ? (Number(foundry.utils.getProperty(actor, CONFIG.willPerm)) || 0) : (Number(foundry.utils.getProperty(actor, `system.attributes.${attrKey}.total`)) || 0);
         let skillValue = skillKey ? (Number(foundry.utils.getProperty(actor, `system.abilities.${skillKey}.value`)) || 0) : 0;
-        
         const pool = attrValue + skillValue;
         if (pool > 0) {
-            const roll = new Roll(`${pool}d10`);
-            await roll.evaluate();
-            let successes = 0, ones = 0;
+            const roll = new Roll(`${pool}d10`); await roll.evaluate();
+            let succ = 0, ones = 0;
             for (let die of roll.dice[0].results) {
-                if (die.result >= customDifficulty) successes += (die.result === 10 && useSpeciality) ? 2 : 1;
+                if (die.result >= customDifficulty) succ += (die.result === 10 && useSpeciality) ? 2 : 1;
                 if (die.result === 1) ones++;
             }
-            let netSuccesses = Math.max(0, successes - ones);
-            if (useWillpower) netSuccesses += 1;
-
+            let net = Math.max(0, succ - ones); if (useWillpower) net += 1;
             const diceHTML = roll.dice[0].results.map(d => {
                 let color = d.result >= customDifficulty ? "#4caf50" : (d.result === 1 ? "#f44336" : "#ccc");
                 if (d.result === 10 && useSpeciality) color = "#ffd700";
                 return `<span style="display: inline-block; width: 24px; height: 24px; line-height: 24px; text-align: center; background: #222; color: ${color}; border: 1px solid ${color}; border-radius: 4px; margin: 2px; font-weight: bold;">${d.result}</span>`;
             }).join("");
-
-            let wpText = useWillpower ? `<br><span style="color: #00008b; font-weight: bold;">+1 автоуспех (Воля)</span>` : "";
-            rollHTML = `<div style="margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.05); border-radius: 5px; text-align: center;"><div style="margin-bottom: 5px;">Пул: <strong>${pool}d10</strong> (Сложность: ${customDifficulty})</div><div>${diceHTML}</div><div style="margin-top: 5px; font-size: 1.1em;">Успехи: <strong style="color: #2e6b4e;">${netSuccesses}</strong>${wpText}</div></div>`;
+            let wpText = useWillpower ? `<br><span style="color: #00008b; font-weight: bold;">+1 автоуспех</span>` : "";
+            rollHTML = `<div style="margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.05); border-radius: 5px; text-align: center;"><div style="margin-bottom: 5px;">Пул: <strong>${pool}d10</strong> (Сложность: ${customDifficulty})</div><div>${diceHTML}</div><div style="margin-top: 5px; font-size: 1.1em;">Успехи: <strong style="color: #2e6b4e;">${net}</strong>${wpText}</div></div>`;
         }
-    } else {
-        rollHTML = `<div style="margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.05); border-radius: 5px; text-align: center; font-style: italic; color: #555;">Эта сила не требует броска.</div>`;
-    }
+    } else { rollHTML = `<div style="margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.05); border-radius: 5px; text-align: center; font-style: italic; color: #555;">Эта сила не требует броска.</div>`; }
 
-    let chatData = {
-        speaker: ChatMessage.getSpeaker({ actor: actor }),
-        content: `<div style="font-family: 'Signika', sans-serif;"><h3 style="margin-top: 0; margin-bottom: 5px; border-bottom: 2px solid #8b0000; padding-bottom: 3px;">${power.name}</h3>${resourceHTML}${rollHTML}<div style="margin-top: 10px; font-size: 0.9em; border-top: 1px solid #ccc; padding-top: 5px;">${power.system.description || ""}${power.system.details || ""}</div></div>`
-    };
-    
+    let chatData = { speaker: ChatMessage.getSpeaker({ actor: actor }), content: `<div style="font-family: 'Signika', sans-serif;"><h3 style="margin-top: 0; margin-bottom: 5px; border-bottom: 2px solid #8b0000; padding-bottom: 3px;">${power.name}</h3>${resourceHTML}${rollHTML}<div style="margin-top: 10px; font-size: 0.9em; border-top: 1px solid #ccc; padding-top: 5px;">${power.system.description || ""}${power.system.details || ""}</div></div>` };
     const players = getPlayerActors();
     if (!players.some(p => p.id === actor.id)) chatData.whisper = ChatMessage.getWhisperRecipients("GM");
     ChatMessage.create(chatData);
