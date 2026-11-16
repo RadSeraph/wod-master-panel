@@ -10,20 +10,13 @@
     <div id="tab-health" class="wod-tab-content active">
         <div id="health-npc-block" style="display: none; margin-bottom: 10px; padding: 5px; background: rgba(0,0,0,0.1); border-radius: 4px; border: 1px solid #444;">
             <label style="font-weight: bold; color: #000; margin-bottom: 2px; display: block; font-size: 13px;">Выбрать NPC:</label>
-            <select id="health-npc-select" style="width: 100%; padding: 4px; border-radius: 4px; border: 1px solid #666; color: #000; font-size: 13px;">
-                <!-- Опции добавятся скриптом -->
-            </select>
+            <select id="health-npc-select" style="width: 100%; padding: 4px; border-radius: 4px; border: 1px solid #666; color: #000; font-size: 13px;"></select>
         </div>
-
-        <div id="health-actor-list" style="margin-bottom: 10px;">
-            <!-- Кнопки персонажей добавятся скриптом -->
-        </div>
-
+        <div id="health-actor-list" style="margin-bottom: 10px;"></div>
         <div style="margin-bottom: 10px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.05); padding: 4px; border-radius: 4px; border-top: 1px solid #555;">
             <input type="checkbox" id="health-use-blood" checked style="margin-right: 6px; cursor: pointer; transform: scale(1.1);">
             <label for="health-use-blood" style="cursor: pointer; font-size: 13px; font-weight: bold; color: #000;">Тратить Кровь на лечение</label>
         </div>
-
         <div style="margin-bottom: 5px;">
             <div class="wod-resource-title" style="color: #000;">Дробящий (Bashing)</div>
             <div class="wod-grid" id="grid-bashing"></div>
@@ -42,15 +35,9 @@
     <div id="tab-resources" class="wod-tab-content">
         <div id="res-npc-block" style="display: none; margin-bottom: 10px; padding: 5px; background: rgba(0,0,0,0.1); border-radius: 4px; border: 1px solid #444;">
             <label style="font-weight: bold; color: #000; margin-bottom: 2px; display: block; font-size: 13px;">Выбрать NPC:</label>
-            <select id="res-npc-select" style="width: 100%; padding: 4px; border-radius: 4px; border: 1px solid #666; color: #000; font-size: 13px;">
-                <!-- Опции добавятся скриптом -->
-            </select>
+            <select id="res-npc-select" style="width: 100%; padding: 4px; border-radius: 4px; border: 1px solid #666; color: #000; font-size: 13px;"></select>
         </div>
-
-        <div id="res-actor-list" style="margin-bottom: 10px;">
-            <!-- Кнопки персонажей добавятся скриптом -->
-        </div>
-
+        <div id="res-actor-list" style="margin-bottom: 10px;"></div>
         <div class="wod-resource-section">
             <div class="wod-resource-title" style="color: #8b0000;">Кровь</div>
             <div class="wod-grid" id="grid-blood"></div>
@@ -65,9 +52,7 @@
     <div id="tab-disciplines" class="wod-tab-content">
         <div id="disc-npc-block" style="display: none; margin-bottom: 10px; padding: 5px; background: rgba(0,0,0,0.1); border-radius: 4px; border: 1px solid #444;">
             <label style="font-weight: bold; color: #000; margin-bottom: 2px; display: block; font-size: 13px;">Выбрать персонажа:</label>
-            <select id="disc-npc-select" style="width: 100%; padding: 4px; border-radius: 4px; border: 1px solid #666; color: #000; font-size: 13px;">
-                <!-- Опции добавятся скриптом -->
-            </select>
+            <select id="disc-npc-select" style="width: 100%; padding: 4px; border-radius: 4px; border: 1px solid #666; color: #000; font-size: 13px;"></select>
         </div>
 
         <div class="form-group" id="disc-actor-block" style="margin-bottom: 10px;">
@@ -81,7 +66,6 @@
         </div>
 
         <div id="disc-description" class="wod-desc-block"></div>
-
         <div id="disc-req-block" class="wod-req-block"></div>
 
         <div class="form-group" id="disc-spec-block" style="display: none; margin-top: 10px; padding: 5px; background: rgba(0,0,0,0.05); border-radius: 4px;">
@@ -100,7 +84,15 @@
 
         <div class="form-group" style="margin-top: 10px;">
             <label>Сложность броска:</label>
-            <input type="number" id="disc-difficulty" value="6" style="width: 100%;" />
+            <div id="disc-difficulty-buttons" style="display: flex; gap: 4px; margin-top: 4px;"></div>
+            <input type="hidden" id="disc-difficulty" value="6"> 
+        </div>
+
+        <div class="form-group" style="margin-top: 10px; padding: 5px; background: rgba(0,0,0,0.05); border-radius: 4px;">
+            <label style="display: flex; align-items: center; cursor: pointer; margin: 0; color: #8b0000; font-weight: bold;">
+                <input type="checkbox" id="disc-blind-roll" style="margin-right: 8px; width: 16px; height: 16px;">
+                <span>Скрытый бросок (виден только Мастеру)</span>
+            </label>
         </div>
 
         <div id="disc-final-cost" class="wod-final-cost">
