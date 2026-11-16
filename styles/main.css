@@ -2,19 +2,22 @@
 .wod-panel-container {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 5px; /* Уменьшили отступы между блоками */
     font-family: 'Signika', sans-serif;
+    height: 100%;
+    overflow: hidden;
 }
 
 .wod-panel-tabs {
     display: flex;
     border-bottom: 2px solid #555;
-    margin-bottom: 10px;
+    margin-bottom: 5px;
+    flex-shrink: 0;
 }
 
 .wod-tab-btn {
     flex: 1;
-    padding: 8px;
+    padding: 5px;
     background: rgba(0, 0, 0, 0.1);
     border: 1px solid #444;
     border-bottom: none;
@@ -34,23 +37,26 @@
 .wod-tab-content {
     display: none;
     flex-direction: column;
-    gap: 10px;
+    gap: 5px; /* Уменьшили отступы внутри вкладки */
+    flex-grow: 1;
+    overflow-y: auto; /* Прокрутка только внутри вкладки, если надо */
+    padding-right: 5px;
 }
 
 .wod-tab-content.active {
     display: flex;
 }
 
-/* Список персонажей */
+/* Кнопки персонажей */
 .wod-actor-btn {
     width: 100%;
-    height: 32px;
-    margin-bottom: 4px;
+    height: 30px; /* Уменьшили высоту кнопок */
+    margin-bottom: 3px;
     border: 1px solid #444;
     background: rgba(0, 0, 0, 0.05);
     color: #000;
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: bold;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -79,9 +85,9 @@
 
 .wod-grid-btn {
     flex: 1;
-    padding: 6px 0;
+    padding: 4px 0; /* Уменьшили отступы внутри кнопок */
     border-radius: 4px;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: bold;
     cursor: pointer;
     transition: 0.1s;
@@ -101,21 +107,21 @@
 /* Блок ресурсов */
 .wod-resource-section {
     border-top: 1px solid #555;
-    padding-top: 8px;
+    padding-top: 5px;
     margin-bottom: 5px;
 }
 
 .wod-resource-title {
     font-weight: bold;
-    margin-bottom: 5px;
+    margin-bottom: 3px;
     text-align: center;
-    font-size: 14px;
+    font-size: 13px;
 }
 
-/* Блок требований */
+/* Блок требований и описания */
 .wod-req-block {
     margin-top: 5px;
-    padding: 8px;
+    padding: 5px;
     display: none;
     background: rgba(0, 0, 0, 0.1);
     border-radius: 4px;
@@ -128,20 +134,19 @@
     font-weight: bold;
     font-size: 1.1em;
     color: #333;
-    padding: 8px;
+    padding: 5px;
     background: rgba(0, 0, 0, 0.05);
     border-radius: 4px;
     border: 1px solid #aaa;
-    margin-top: 10px;
+    margin-top: auto; /* Прижимает к низу */
 }
 
-/* Блок описания */
 .wod-desc-block {
-    padding: 8px;
+    padding: 5px;
     background: rgba(0, 0, 0, 0.05);
     border: 1px solid #ccc;
     border-radius: 4px;
-    height: 180px;
+    height: 150px; /* Уменьшили высоту блока описания */
     overflow-y: auto;
     font-size: 0.9em;
     color: #222;
