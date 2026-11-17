@@ -80,24 +80,24 @@
 .wod-grid {
     display: flex;
     flex-wrap: nowrap;
-    gap: 2px;
-    justify-content: space-between; /* Растягиваем кнопки на всю ширину */
+    gap: 1px; /* Чуть уменьшили расстояние между кнопками */
+    justify-content: space-between;
     margin-bottom: 4px;
-    flex-grow: 1; /* Сетка занимает всё свободное место */
-    min-width: 0; /* Важно для flex-элементов, чтобы они могли сжиматься */
+    flex-grow: 1;
+    min-width: 0;
 }
 
 .wod-grid-btn {
-    flex: 1 1 0px; /* Кнопки растягиваются равномерно, но могут сжиматься */
+    flex: 1 1 0%;
     padding: 5px 0;
     border-radius: 4px;
-    font-size: 12px;
+    font-size: 11px; /* Уменьшили шрифт для лучшей влезаемости */
     font-weight: bold;
     cursor: pointer;
     transition: 0.1s;
     border: 1px solid #333;
     text-align: center;
-    min-width: 20px; /* Минимальный размер, чтобы цифры не слипались */
+    min-width: 0;
 }
 
 .wod-grid-btn:active {
@@ -219,27 +219,41 @@
 .wod-grid-with-arrows {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 2px;
     margin-bottom: 4px;
     width: 100%;
+    box-sizing: border-box;
 }
 
 .wod-grid-with-arrows .wod-grid {
+    display: flex;
     flex-grow: 1;
     margin-bottom: 0;
-    min-width: 0; /* Позволяет сетке сжиматься */
+    gap: 1px; 
+    overflow: hidden;
+}
+
+.wod-grid-with-arrows .wod-grid-btn {
+    flex: 1 1 0%; 
+    padding: 4px 0;
+    font-size: 11px; 
+    min-width: 0; 
 }
 
 .wod-arrow-btn {
-    padding: 4px 4px;
-    font-size: 14px;
+    padding: 4px 0;
+    font-size: 12px;
     background: #333;
     color: #ddd;
     border: 1px solid #555;
     border-radius: 4px;
     cursor: pointer;
     transition: 0.1s;
-    flex-shrink: 0; /* Стрелки не сжимаются */
+    flex-shrink: 0;
+    width: 20px; /* Сделали стрелки узкими */
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .wod-arrow-btn:hover {
