@@ -1,6 +1,6 @@
 // ==========================================
 // МОДУЛЬ: WoD Master Panel
-// Файл: scripts/main.js (Версия 2.1 - со стрелками)
+// Файл: scripts/main.js (Версия 2.2 - фикс сеток)
 // ==========================================
 
 const CONFIG = {
@@ -193,7 +193,6 @@ function setupPanelLogic(html, isGM) {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = `wod-arrow-btn wod-arrow-${direction}`;
-        // ▼ (down) слева - урон/опустошить. ▲ (up) справа - лечение/заполнить.
         const val = (direction === 'down') ? (isDamage ? 7 : -10) : (isDamage ? -7 : 10);
         btn.dataset.type = type;
         btn.dataset.val = val;
@@ -490,7 +489,7 @@ async function processResourceAction(html, type, value, npcId, players) {
 
     for (const actor of targets) {
         if (!actor) continue;
-                const rawValue = foundry.utils.getProperty(actor, config.path);
+        const rawValue = foundry.utils.getProperty(actor, config.path);
         if (rawValue === undefined || rawValue === null) { 
             ui.notifications.warn(`${actor.name}: нет ресурса (${config.name})!`); 
             continue; 
