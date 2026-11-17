@@ -182,10 +182,12 @@
     background: #2c6b81;
 }
 
+/* Пункт 5: Яркая подсветка активной кнопки сложности */
 #disc-difficulty-buttons button.active {
-    background: #2c6b81;
-    border-color: #5bb9d6;
-    box-shadow: 0 0 8px rgba(91, 185, 214, 0.6);
+    background: #10b981;
+    border-color: #34d399;
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.8);
+    color: white;
 }
 
 /* ==========================================
