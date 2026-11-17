@@ -1,12 +1,9 @@
 // ==========================================
-// 1. ЗАЩИТА ОТ СЖАТОГО ОКНА
+// МОДУЛЬ: WoD Master Panel
+// Файл: scripts/main.js
 // ==========================================
-Object.defineProperty(window, 'innerWidth', {value: 1920, writable: true, configurable: true});
-Object.defineProperty(window, 'innerHeight', {value: 1080, writable: true, configurable: true});
 
-// ==========================================
-// 2. НАСТРОЙКИ И КОНСТАНТЫ
-// ==========================================
+// Настройки путей (вынесены в константу)
 const CONFIG = {
     folderName: "Наше ненадежное будущее",
     bloodPath: "system.advantages.bloodpool.temporary",
@@ -17,24 +14,15 @@ const CONFIG = {
     healthPath: "system.health.damage"
 };
 
-function getSavedWindowSize() {
-    const saved = localStorage.getItem("wod-panel-size");
-    if (saved) {
-        try {
-            const size = JSON.parse(saved);
-            return { width: size.width, height: size.height };
-        } catch (e) {}
-    }
-    return { width: 550, height: 700 };
-}
-
-// ==========================================
-// 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-// ==========================================
+// Вспомогательные функции
 function getPlayerActors() {
     const folder = game.folders.find(f => f.name === CONFIG.folderName && f.type === "Actor");
     if (!folder) return [];
-    return game.actors.filter(a => a.folder?.id === folder.id);
+    let actors = game.actors.filter(a => a.folder?.id === folder.id);
+    if (!game.user.isGM) {
+        actors = actors.filter(a => a.id === game.user.character?.id);
+    }
+    return actors;
 }
 
 function getNPCActors() {
@@ -76,207 +64,118 @@ function getGroupedPowerOptions(actor) {
     return html;
 }
 
-// ==========================================
-// 4. СОЗДАНИЕ РАДИАЛЬНОГО МЕНЮ
-// ==========================================
-Hooks.on("ready", () => {
-    console.log("WoD Master Panel | Инициализация...");
+// Функция для создания CSS-камня в чате
+function createDiceHTML(value, resultType) {
+    let gradStart, gradEnd, strokeColor;
     
-    const container = document.createElement("div");
-    container.id = "wod-radial-menu";
-    
-    const savedPos = localStorage.getItem("wod-menu-pos");
-    let posX = savedPos ? JSON.parse(savedPos).x : window.innerWidth - 100;
-    let posY = savedPos ? JSON.parse(savedPos).y : window.innerHeight - 100;
-
-    container.style.cssText = `
-        position: fixed; top: ${posY}px; left: ${posX}px; width: 60px; height: 60px; z-index: 9999;
-        cursor: grab;
-    `;
-
-    const mainBtn = document.createElement("div");
-    mainBtn.id = "wod-main-btn";
-    mainBtn.innerHTML = '<i class="fas fa-dice-d10"></i>';
-    mainBtn.style.cssText = `
-        width: 60px; height: 60px; background: #10b981; color: white; border-radius: 50%;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 28px; box-shadow: 0 4px 15px rgba(0,0,0,0.6);
-        transition: all 0.3s ease; border: 2px solid #34d399; position: relative; z-index: 2;
-    `;
-
-    function createSubBtn(icon, title, tabName, x, y) {
-        const subBtn = document.createElement("div");
-        subBtn.className = "wod-sub-btn";
-        subBtn.innerHTML = `<i class="fas ${icon}"></i>`;
-        subBtn.title = title;
-        subBtn.style.cssText = `
-            position: absolute; top: 7px; left: 7px; width: 45px; height: 45px; background: #0f766e; color: white;
-            border-radius: 50%; display: flex; align-items: center; justify-content: center;
-            font-size: 20px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.5);
-            border: 1px solid #14b8a6; transition: all 0.3s ease;
-            opacity: 0; pointer-events: none; transform: translate(0px, 0px) scale(0);
-            z-index: 1;
-        `;
-        subBtn.dataset.x = x;
-        subBtn.dataset.y = y;
-        subBtn.onclick = (e) => { e.stopPropagation(); openMainPanel(tabName); };
-        return subBtn;
+    if (resultType === 'success') {
+        gradStart = '#2ecc71'; gradEnd = '#145a32'; strokeColor = '#1a7a1a';
+    } else if (resultType === 'fail') {
+        gradStart = '#e74c3c'; gradEnd = '#641e16'; strokeColor = '#c00000';
+    } else if (resultType === 'spec') {
+        gradStart = '#f1c40f'; gradEnd = '#7d6608'; strokeColor = '#d4a017';
+    } else {
+        gradStart = '#7f8c8d'; gradEnd = '#2c3e50'; strokeColor = '#5a5a5a';
     }
 
-    const btnHealth = createSubBtn("fa-heart", "Здоровье", "tab-health", 0, -70); 
-    const btnRes = createSubBtn("fa-tint", "Ресурсы", "tab-resources", -65, 25); 
-    const btnDisc = createSubBtn("fa-book", "Дисциплины", "tab-disciplines", 65, 25); 
+    return `
+        <span style="
+            display: inline-block;
+            width: 28px; height: 32px;
+            background: linear-gradient(145deg, ${gradStart}, ${gradEnd});
+            clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+            line-height: 32px;
+            text-align: center;
+            margin: 2px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            border: 1px solid ${strokeColor};
+        ">${value}</span>
+    `;
+}
 
-    container.appendChild(mainBtn);
-    container.appendChild(btnHealth);
-    container.appendChild(btnRes);
-    container.appendChild(btnDisc);
-    document.body.appendChild(container);
-
-    let isDragging = false;
-    let startX, startY, initialX, initialY;
-
-    container.addEventListener("mousedown", (e) => {
-        if (e.target.closest('.wod-sub-btn')) return;
-        isDragging = true;
-        startX = e.clientX;
-        startY = e.clientY;
-        initialX = container.offsetLeft;
-        initialY = container.offsetTop;
-        container.style.cursor = "grabbing";
-    });
-
-    document.addEventListener("mousemove", (e) => {
-        if (!isDragging) return;
-        e.preventDefault();
-        const dx = e.clientX - startX;
-        const dy = e.clientY - startY;
-        container.style.left = `${initialX + dx}px`;
-        container.style.top = `${initialY + dy}px`;
-    });
-
-    document.addEventListener("mouseup", () => {
-        if (isDragging) {
-            isDragging = false;
-            container.style.cursor = "grab";
-            localStorage.setItem("wod-menu-pos", JSON.stringify({x: container.offsetLeft, y: container.offsetTop}));
-        }
-    });
-
-    let isMenuOpen = false;
-    container.addEventListener("mouseenter", () => {
-        if (isMenuOpen || isDragging) return;
-        isMenuOpen = true;
-        mainBtn.style.transform = "rotate(45deg)";
-        mainBtn.style.background = "#059669";
-        container.querySelectorAll(".wod-sub-btn").forEach(btn => {
-            btn.style.opacity = "1";
-            btn.style.pointerEvents = "auto";
-            btn.style.transform = `translate(${btn.dataset.x}px, ${btn.dataset.y}px) scale(1)`;
-        });
-    });
-
-    container.addEventListener("mouseleave", () => {
-        isMenuOpen = false;
-        mainBtn.style.transform = "rotate(0deg)";
-        mainBtn.style.background = "#10b981";
-        container.querySelectorAll(".wod-sub-btn").forEach(btn => {
-            btn.style.opacity = "0";
-            btn.style.pointerEvents = "none";
-            btn.style.transform = `translate(0px, 0px) scale(0)`;
-        });
-    });
-});
-
-// ==========================================
-// 5. ОСНОВНОЕ ОКНО
-// ==========================================
+// Основные функции панели
 async function openMainPanel(initialTab = "tab-health") {
     const isGM = game.user.isGM;
+    // Загружаем шаблон из файлов модуля
     const template = await renderTemplate("modules/wod-master-panel/templates/panel.html", {});
-    const windowSize = getSavedWindowSize();
     
     const dialog = new Dialog({
         title: "WoD Master Panel",
         content: template,
         buttons: {
-            close: { label: "Закрыть" },
-            useDisc: { label: "Использовать", callback: (html) => { executeDiscipline(html); } }
+            close: { label: "Закрыть" }
         },
         render: (html) => { 
             setupPanelLogic(html, isGM); 
+            
+            const myButton = $('<button type="button" class="wod-my-use-btn" style="margin-top: 10px; padding: 8px 16px; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%;">Использовать</button>');
+            myButton.click(async () => {
+                try {
+                    await executeDiscipline(html);
+                } catch (e) {
+                    console.error("WoD Panel | Ошибка при броске: ", e);
+                    ui.notifications.error("Ошибка при использовании дисциплины. Смотрите консоль.");
+                }
+            });
+            html.find('#tab-disciplines').append(myButton);
+            
             if (initialTab !== "tab-health") {
                 html.find('.wod-tab-btn').removeClass('active');
                 html.find('.wod-tab-content').removeClass('active');
                 html.find(`.wod-tab-btn[data-tab="${initialTab}"]`).addClass('active');
                 html.find(`#${initialTab}`).addClass('active');
-                if (initialTab === 'tab-disciplines') {
-                    html.closest('.dialog').find('.dialog-buttons').find('.useDisc').show();
-                }
             }
         }
-    }, { width: windowSize.width, height: windowSize.height, resizable: true });
+    }, { width: 550, height: 700, resizable: true, closeOnSubmit: false });
     
     dialog.render(true);
-
-    setTimeout(() => {
-        const app = Object.values(ui.windows).find(w => w.title === "WoD Master Panel");
-        if (app) {
-            app.options.closeOnSubmit = false;
-            const originalSetPosition = app.setPosition.bind(app);
-            app.setPosition = function(position) {
-                originalSetPosition(position);
-                if (position.width && position.height) {
-                    localStorage.setItem("wod-panel-size", JSON.stringify({ width: position.width, height: position.height }));
-                }
-            };
-        }
-    }, 100);
 }
 
-// ==========================================
-// 6. ЛОГИКА ПАНЕЛИ
-// ==========================================
 function setupPanelLogic(html, isGM) {
     html.find('.wod-tab-btn').click(function() {
         html.find('.wod-tab-btn').removeClass('active');
         html.find('.wod-tab-content').removeClass('active');
         $(this).addClass('active');
         html.find('#' + $(this).data('tab')).addClass('active');
-        
-        const dialogButtons = html.closest('.dialog').find('.dialog-buttons');
-        if ($(this).data('tab') === 'tab-disciplines') { dialogButtons.find('.useDisc').show(); }
-        else { dialogButtons.find('.useDisc').hide(); }
     });
 
     const players = getPlayerActors();
     const npcs = getNPCActors();
 
-    // 1. Вкладка Здоровье
-    let healthActorsHTML = `<button type="button" class="wod-actor-btn" data-id="ALL">★ ВСЕ ПЕРСОНАЖИ ★</button>`;
+    // Здоровье
+    let healthActorsHTML = "";
+    if (isGM) healthActorsHTML += `<button type="button" class="wod-actor-btn" data-id="ALL">★ ВСЕ ПЕРСОНАЖИ ★</button>`;
     players.forEach(p => healthActorsHTML += `<button type="button" class="wod-actor-btn" data-id="${p.id}">${p.name}</button>`);
     html.find('#health-actor-list').html(healthActorsHTML);
-    
     if (isGM) {
         let npcOptions = `<option value="">Не выбрано</option>`;
         npcs.forEach(n => npcOptions += `<option value="${n.id}">${n.name}</option>`);
         html.find('#health-npc-select').html(npcOptions);
         html.find('#health-npc-block').show();
+    } else {
+        html.find('#health-actor-list').hide();
+        html.find('#health-npc-block').hide();
     }
 
-    // 2. Вкладка Ресурсы
-    let resActorsHTML = `<button type="button" class="wod-actor-btn" data-id="ALL">★ ВСЕ ПЕРСОНАЖИ ★</button>`;
+    // Ресурсы
+    let resActorsHTML = "";
+    if (isGM) resActorsHTML += `<button type="button" class="wod-actor-btn" data-id="ALL">★ ВСЕ ПЕРСОНАЖИ ★</button>`;
     players.forEach(p => resActorsHTML += `<button type="button" class="wod-actor-btn" data-id="${p.id}">${p.name}</button>`);
     html.find('#res-actor-list').html(resActorsHTML);
-    
     if (isGM) {
         let npcOptions = `<option value="">Не выбрано</option>`;
         npcs.forEach(n => npcOptions += `<option value="${n.id}">${n.name}</option>`);
         html.find('#res-npc-select').html(npcOptions);
         html.find('#res-npc-block').show();
+    } else {
+        html.find('#res-actor-list').hide();
+        html.find('#res-npc-block').hide();
     }
 
-    // 3. Вкладка Дисциплины
+    // Дисциплины
     if (isGM) {
         let discOptions = `<option value="">Не выбрано</option>`;
         const actorsWithPowers = game.actors.contents.filter(a => a.items.some(i => i.type === "Power" && i.system.level > 0)).sort((a,b) => a.name.localeCompare(b.name));
@@ -285,11 +184,14 @@ function setupPanelLogic(html, isGM) {
         html.find('#disc-npc-block').show();
         html.find('#disc-actor-block').hide();
     } else {
-        let actorOptions = "";
-        players.filter(a => a.items.some(i => i.type === "Power" && i.system.level > 0)).forEach(a => actorOptions += `<option value="${a.id}">${a.name}</option>`);
-        html.find('#disc-actor-select').html(actorOptions);
+        const actor = game.user.character;
+        if (actor) {
+            html.find('#disc-actor-select').html(`<option value="${actor.id}">${actor.name}</option>`);
+            html.find('#disc-actor-block').hide();
+        }
     }
 
+    // Сетки
     function createGrid(targetId, type, isDamage) {
         let htmlGrid = "";
         if (isDamage) {
@@ -309,6 +211,7 @@ function setupPanelLogic(html, isGM) {
     createGrid('#grid-blood', 'blood', false);
     createGrid('#grid-will', 'will', false);
 
+    // Клики
     html.find('.wod-actor-btn').click(function(e) {
         if (isGM) $(this).closest('.wod-tab-content').find('select').val("");
         if ($(this).data('id') === "ALL") {
@@ -334,15 +237,14 @@ function setupPanelLogic(html, isGM) {
         processResourceAction(html, type, val, npcId, players);
     });
 
-    // ЛОГИКА КНОПОК СЛОЖНОСТИ
+    // Кнопки сложности
     const diffContainer = html.find('#disc-difficulty-buttons');
     const diffInput = html.find('#disc-difficulty');
-    
     const renderDifficultyButtons = (currentDiff) => {
         diffContainer.empty();
         for (let i = 3; i <= 10; i++) {
             const isActive = i === currentDiff;
-            const btn = $(`<button type="button" class="wod-diff-btn" data-val="${i}" style="flex: 1; padding: 5px 0; background: ${isActive ? '#2c6b81' : '#1f5c73'}; color: white; border: 1px solid ${isActive ? '#5bb9d6' : '#333'}; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold;">${i}</button>`);
+            const btn = $(`<button type="button" class="wod-diff-btn ${isActive ? 'active' : ''}" data-val="${i}">${i}</button>`);
             btn.click(function() {
                 const val = $(this).data('val');
                 diffInput.val(val);
@@ -369,9 +271,37 @@ function setupPanelLogic(html, isGM) {
         diffInput.val(diff);
         renderDifficultyButtons(diff);
 
-        let desc = power.system.description || "Нет описания.";
-        if (power.system.details) desc += `<hr style="margin: 5px 0; border: 0; border-top: 1px solid #ccc;">` + power.system.details;
-        html.find('#disc-description').html(desc);
+        let attrInfoHTML = "";
+        if (power.system.dice1) {
+            const attrKey = power.system.dice1, skillKey = power.system.dice2;
+            let attrValue = attrKey === "willpower" ? (Number(foundry.utils.getProperty(actor, CONFIG.willPerm)) || 0) : (Number(foundry.utils.getProperty(actor, `system.attributes.${attrKey}.total`)) || 0);
+            let skillValue = skillKey ? (Number(foundry.utils.getProperty(actor, `system.abilities.${skillKey}.value`)) || 0) : 0;
+            
+            let woundPenalty = 0;
+            const health = foundry.utils.getProperty(actor, CONFIG.healthPath);
+            if (health) {
+                const totalDamage = (Number(health.bashing) || 0) + (Number(health.lethal) || 0) + (Number(health.aggravated) || 0);
+                if (totalDamage >= 6) woundPenalty = -5;
+                else if (totalDamage >= 4) woundPenalty = -2;
+                else if (totalDamage >= 2) woundPenalty = -1;
+            }
+
+            attrInfoHTML = `
+                <div style="margin-top: 5px; font-size: 0.9em; color: #333; background: rgba(0,0,0,0.05); padding: 5px; border-radius: 4px;">
+                    <strong>Пул:</strong> ${attrKey} (${attrValue}) + ${skillKey || "0"} (${skillValue}) 
+                    ${woundPenalty !== 0 ? `<span style="color: red;">Штраф от ран: ${woundPenalty}</span>` : ""}
+                </div>
+                <div style="margin-top: 5px; display: flex; align-items: center; gap: 5px;">
+                    <label style="font-size: 0.9em;">Бонус/Штраф кубов:</label>
+                    <input type="number" id="disc-manual-bonus" value="0" style="width: 50px; padding: 2px;">
+                </div>
+            `;
+        }
+        
+        let descHTML = power.system.description || "Нет описания.";
+        if (power.system.details) descHTML += `<hr style="margin: 5px 0; border: 0; border-top: 1px solid #ccc;">` + power.system.details;
+
+        html.find('#disc-description').html(attrInfoHTML + descHTML);
 
         const skillKey = power.system.dice2;
         if (skillKey) {
@@ -422,7 +352,7 @@ function setupPanelLogic(html, isGM) {
         if (bCost > 0) parts.push(`${bCost} Кровь`);
         if (wCost > 0) parts.push(`${wCost} Воля`);
 
-        if (parts.length > 0) html.find('#disc-final-cost').html(`Итоговая стоимость: <span style="color: #8b0000;">${parts.join(' | ')}</span>`);
+        if (parts.length > 0) html.find('#disc-final-cost').html(`Итоговая стоимость: <span style="color: #ff4d4d; font-weight: bold;">${parts.join(' | ')}</span>`);
         else html.find('#disc-final-cost').html(`Итоговая стоимость: <span style="color: #2e6b4e;">Нет</span>`);
     };
 
@@ -434,20 +364,26 @@ function setupPanelLogic(html, isGM) {
         const actor = game.actors.get(actorId);
         if (actor) updateFinalCostDisplay(actor, actor.items.get(html.find('#disc-power-select').val()));
     });
+    html.find('#disc-description').on('change', '#disc-manual-bonus', () => {
+        let actorId = isGM ? html.find('#disc-npc-select').val() : html.find('#disc-actor-select').val();
+        const actor = game.actors.get(actorId);
+        if (actor) updateFinalCostDisplay(actor, actor.items.get(html.find('#disc-power-select').val()));
+    });
 
     updateDiscUI();
-    html.closest('.dialog').find('.dialog-buttons').find('.useDisc').hide();
 }
 
-// ==========================================
-// 7. ФУНКЦИИ ОБРАБОТКИ
-// ==========================================
 async function processHealthAction(html, type, value, useBlood, npcId, players) {
     let targets = [];
     if (npcId) { targets = [game.actors.get(npcId)]; } else {
         const activeBtns = html.find('.wod-tab-content.active .wod-actor-btn.active');
-        if (activeBtns.length === 0) return ui.notifications.warn("Выберите персонажа!");
-        if (html.find('.wod-actor-btn[data-id="ALL"].active').length > 0) { targets = players; } else {
+        if (activeBtns.length === 0 && game.user.character) {
+            targets = [game.user.character];
+        } else if (activeBtns.length === 0) {
+            return ui.notifications.warn("Выберите персонажа!");
+        } else if (html.find('.wod-actor-btn[data-id="ALL"].active').length > 0) { 
+            targets = players; 
+        } else {
             activeBtns.each(function() { targets.push(game.actors.get($(this).data('id'))); });
         }
     }
@@ -492,11 +428,10 @@ async function processHealthAction(html, type, value, useBlood, npcId, players) 
         let bloodText = totalBloodCost > 0 ? ` (потрачено ${totalBloodCost} Крови)` : (value < 0 && !useBlood ? ` (без траты Крови)` : "");
         let chatData = { speaker: ChatMessage.getSpeaker(), content: `<p><strong>${targetName}</strong> ${value > 0 ? "получает" : "лечит"} <strong>${Math.abs(value)}</strong> ${namesMap[type]} урона${bloodText}.</p>` };
         
-        if (npcId || !game.user.isGM) {
-            let whisperTargets = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
-            if (!game.user.isGM) whisperTargets.push(game.user.id);
-            chatData.whisper = whisperTargets;
-        }
+        let whisperTargets = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
+        if (!game.user.isGM) whisperTargets.push(game.user.id);
+        chatData.whisper = whisperTargets;
+        
         ChatMessage.create(chatData);
     }
 }
@@ -505,29 +440,48 @@ async function processResourceAction(html, type, value, npcId, players) {
     let targets = [];
     if (npcId) { targets = [game.actors.get(npcId)]; } else {
         const activeBtns = html.find('.wod-tab-content.active .wod-actor-btn.active');
-        if (activeBtns.length === 0) return ui.notifications.warn("Выберите персонажа!");
-        if (html.find('.wod-actor-btn[data-id="ALL"].active').length > 0) { targets = players; } else {
+        if (activeBtns.length === 0 && game.user.character) {
+            targets = [game.user.character];
+        } else if (activeBtns.length === 0) {
+            return ui.notifications.warn("Выберите персонажа!");
+        } else if (html.find('.wod-actor-btn[data-id="ALL"].active').length > 0) { 
+            targets = players; 
+        } else {
             activeBtns.each(function() { targets.push(game.actors.get($(this).data('id'))); });
         }
     }
     const paths = { blood: { path: CONFIG.bloodPath, max: CONFIG.bloodMax, name: "Кровь" }, will: { path: CONFIG.willPath, max: CONFIG.willMax, name: "Волю" } };
     const config = paths[type];
     let updatedCount = 0;
+    let messageParts = [];
+
     for (const actor of targets) {
         if (!actor) continue;
-        const current = foundry.utils.getProperty(actor, config.path); if (current === undefined) continue;
-        const max = foundry.utils.getProperty(actor, config.max) || 10;
-        let newValue = Math.max(0, Math.min(max, current + value));
-        if (newValue !== current) { await actor.update({ [config.path]: newValue }); updatedCount++; }
-    }
-    if (updatedCount > 0) {
-        let chatData = { speaker: ChatMessage.getSpeaker(), content: `<p><strong>${targets.map(t => t.name).join(', ')}</strong> ${value > 0 ? "восстанавливает" : "тратит"} <strong>${Math.abs(value)}</strong> ${config.name}.</p>` };
+        const current = Number(foundry.utils.getProperty(actor, config.path)); if (isNaN(current)) continue;
+        const max = Number(foundry.utils.getProperty(actor, config.max)) || 10;
         
-        if (npcId || !game.user.isGM) {
-            let whisperTargets = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
-            if (!game.user.isGM) whisperTargets.push(game.user.id);
-            chatData.whisper = whisperTargets;
+        let newValue = current + value;
+        if (newValue < 0) newValue = 0;
+        if (newValue > max) newValue = max;
+
+        if (newValue !== current) { 
+            await actor.update({ [config.path]: newValue }); 
+            updatedCount++; 
         }
+        
+        messageParts.push(`<strong>${actor.name}</strong> (${value > 0 ? "+" : ""}${value} ${config.name} -> Остаток: ${newValue})`);
+    }
+    
+    if (updatedCount > 0) {
+        let chatData = { 
+            speaker: ChatMessage.getSpeaker(), 
+            content: `<p>${messageParts.join('<br>')}</p>` 
+        };
+        
+        let whisperTargets = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
+        if (!game.user.isGM) whisperTargets.push(game.user.id);
+        chatData.whisper = whisperTargets;
+        
         ChatMessage.create(chatData);
     }
 }
@@ -546,6 +500,7 @@ async function executeDiscipline(html) {
     const useSpeciality = html.find('#disc-use-spec').is(':checked');
     const useWillpower = html.find('#disc-use-will').is(':checked');
     const isBlind = html.find('#disc-blind-roll').is(':checked');
+    const manualBonus = Number(html.find('#disc-manual-bonus').val()) || 0;
 
     const inputBloodX = html.find('#input-blood-x'); const inputWillX = html.find('#input-will-x');
     let finalBlood = 0, finalWill = 0;
@@ -574,45 +529,186 @@ async function executeDiscipline(html) {
     }
 
     let rollHTML = "";
+    let roll = null;
+
     if (power.system.dice1) {
         const attrKey = power.system.dice1, skillKey = power.system.dice2;
         let attrValue = attrKey === "willpower" ? (Number(foundry.utils.getProperty(actor, CONFIG.willPerm)) || 0) : (Number(foundry.utils.getProperty(actor, `system.attributes.${attrKey}.total`)) || 0);
         let skillValue = skillKey ? (Number(foundry.utils.getProperty(actor, `system.abilities.${skillKey}.value`)) || 0) : 0;
-        const pool = attrValue + skillValue;
+        
+        let woundPenalty = 0;
+        const health = foundry.utils.getProperty(actor, CONFIG.healthPath);
+        if (health) {
+            const totalDamage = (Number(health.bashing) || 0) + (Number(health.lethal) || 0) + (Number(health.aggravated) || 0);
+            if (totalDamage >= 6) woundPenalty = -5;
+            else if (totalDamage >= 4) woundPenalty = -2;
+            else if (totalDamage >= 2) woundPenalty = -1;
+        }
+
+        const pool = Math.max(0, attrValue + skillValue + manualBonus + woundPenalty);
+        
         if (pool > 0) {
-            const roll = new Roll(`${pool}d10`); 
+            roll = new Roll(`${pool}d10`); 
             await roll.evaluate();
 
-            // ИНТЕГРАЦИЯ DICE SO NICE
-            if (game.dice3d) {
-                await game.dice3d.showForRoll(roll, game.user, true);
+            if (game.dice3d && !isBlind) {
+                await game.dice3d.showForRoll(roll, game.user, true, null, false);
             }
 
             let succ = 0, ones = 0;
-            for (let die of roll.dice[0].results) { if (die.result >= customDifficulty) succ += (die.result === 10 && useSpeciality) ? 2 : 1; if (die.result === 1) ones++; }
-            let net = Math.max(0, succ - ones); if (useWillpower) net += 1;
-            const diceHTML = roll.dice[0].results.map(d => {
-                let color = d.result >= customDifficulty ? "#4caf50" : (d.result === 1 ? "#f44336" : "#ccc");
-                if (d.result === 10 && useSpeciality) color = "#ffd700";
-                return `<span style="display: inline-block; width: 24px; height: 24px; line-height: 24px; text-align: center; background: #222; color: ${color}; border: 1px solid ${color}; border-radius: 4px; margin: 2px; font-weight: bold;">${d.result}</span>`;
-            }).join("");
-            let wpText = useWillpower ? `<br><span style="color: #00008b; font-weight: bold;">+1 автоуспех</span>` : "";
-            rollHTML = `<div style="margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.05); border-radius: 5px; text-align: center;"><div style="margin-bottom: 5px;">Пул: <strong>${pool}d10</strong> (Сложность: ${customDifficulty})</div><div>${diceHTML}</div><div style="margin-top: 5px; font-size: 1.1em;">Успехи: <strong style="color: #2e6b4e;">${net}</strong>${wpText}</div></div>`;
-        }
-    } else { rollHTML = `<div style="margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.05); border-radius: 5px; text-align: center; font-style: italic; color: #555;">Эта сила не требует броска.</div>`; }
+            let diceHTML = "";
+            for (let die of roll.dice[0].results) {
+                let resType = 'neutral';
+                if (die.result >= customDifficulty) {
+                    succ += (die.result === 10 && useSpeciality) ? 2 : 1;
+                    resType = (die.result === 10 && useSpeciality) ? 'spec' : 'success';
+                }
+                if (die.result === 1) {
+                    ones++;
+                    resType = 'fail';
+                }
+                diceHTML += createDiceHTML(die.result, resType);
+            }
 
-    let chatData = { speaker: ChatMessage.getSpeaker({ actor: actor }), content: `<div style="font-family: 'Signika', sans-serif;"><h3 style="margin-top: 0; margin-bottom: 5px; border-bottom: 2px solid #8b0000; padding-bottom: 3px;">${power.name}</h3>${resourceHTML}${rollHTML}<div style="margin-top: 10px; font-size: 0.9em; border-top: 1px solid #ccc; padding-top: 5px;">${power.system.description || ""}${power.system.details || ""}</div></div>` };
+            let netFromDice = Math.max(0, succ - ones);
+            let net = netFromDice;
+            let resultTextHTML = "";
+
+            if (useWillpower) {
+                net += 1;
+                if (netFromDice === 0) {
+                    resultTextHTML = `<div style="margin-top: 8px; font-size: 1.2em; font-weight: bold; color: #2e6b4e;">Успехи: ${net}</div>
+                                      <div style="margin-top: 4px; font-size: 0.9em; font-style: italic; color: #00008b;">"Лишь сильная воля помогает преодолеть трудности!"</div>`;
+                } else {
+                    resultTextHTML = `<div style="margin-top: 8px; font-size: 1.2em; font-weight: bold; color: #2e6b4e;">Успехи: ${net} <span style="font-size: 0.8em; color: #00008b;">(включая +1 от Воли)</span></div>`;
+                }
+            } else {
+                if (succ === 0 && ones > 0) {
+                    resultTextHTML = `<div style="margin-top: 8px; font-size: 1.2em; font-weight: bold; color: #d32f2f;">ПРОВАЛ</div>`;
+                } else if (net === 0) {
+                    resultTextHTML = `<div style="margin-top: 8px; font-size: 1.2em; font-weight: bold; color: #7f8c8d;">НЕУДАЧА</div>`;
+                } else {
+                    resultTextHTML = `<div style="margin-top: 8px; font-size: 1.2em; font-weight: bold; color: #2e6b4e;">Успехи: ${net}</div>`;
+                }
+            }
+
+            rollHTML = `
+                <div style="margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.05); border-radius: 5px; text-align: center;">
+                    <div style="margin-bottom: 5px;">Пул: <strong>${pool}d10</strong> (Сложность: ${customDifficulty})</div>
+                    <div style="line-height: 1;">${diceHTML}</div>
+                    ${resultTextHTML}
+                </div>
+            `;
+        }
+    } else { 
+        rollHTML = `<div style="margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.05); border-radius: 5px; text-align: center; font-style: italic; color: #555;">Эта сила не требует броска.</div>`; 
+    }
+
+    let chatData = { 
+        speaker: ChatMessage.getSpeaker({ actor: actor }), 
+        content: `
+            <div style="font-family: 'Signika', sans-serif;">
+                <h3 style="margin-top: 0; margin-bottom: 5px; border-bottom: 2px solid #8b0000; padding-bottom: 3px;">${power.name}</h3>
+                ${resourceHTML}
+                <div style="margin-top: 10px; font-size: 0.9em; border-top: 1px solid #ccc; padding-top: 5px;">
+                    ${power.system.description || ""}
+                    ${power.system.details || ""}
+                </div>
+                ${rollHTML}
+            </div>
+        `
+    };
     
     if (isBlind) {
         chatData.blind = true;
-    } else {
-        const players = getPlayerActors();
-        if (!players.some(p => p.id === actor.id) || !isGM) {
-            let whisperTargets = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
-            if (!isGM) whisperTargets.push(game.user.id);
-            chatData.whisper = whisperTargets;
-        }
+        chatData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
+        if (roll) chatData.rolls = [roll];
     }
-    
+
     ChatMessage.create(chatData);
 }
+
+// ==========================================
+// АВТОМАТИЧЕСКИЙ ЗАПУСК ПРИ ЗАГРУЗКЕ МИРА
+// ==========================================
+Hooks.on("ready", () => {
+    // Защита от дублирования при перезагрузке
+    if (document.getElementById("wod-radial-menu")) return;
+
+    const container = document.createElement("div");
+    container.id = "wod-radial-menu";
+
+    // Загружаем сохранённую позицию из localStorage
+    const savedPos = localStorage.getItem("wod-radial-menu-pos");
+    if (savedPos) {
+        try {
+            const pos = JSON.parse(savedPos);
+            container.style.cssText = `position: fixed; top: ${pos.top}px; left: ${pos.left}px; width: 120px; height: 120px; z-index: 9999; pointer-events: none;`;
+        } catch (e) {
+            container.style.cssText = "position: fixed; top: 45%; left: 50px; width: 120px; height: 120px; z-index: 9999; pointer-events: none;";
+        }
+    } else {
+        container.style.cssText = "position: fixed; top: 45%; left: 50px; width: 120px; height: 120px; z-index: 9999; pointer-events: none;";
+    }
+
+    function createIcon(icon, title, tabName, top, left) {
+        const btn = document.createElement("div");
+        btn.className = "wod-single-icon";
+        btn.innerHTML = `<i class="fas ${icon}"></i>`;
+        btn.title = title;
+        btn.style.cssText = `
+            position: absolute; top: ${top}px; left: ${left}px; 
+            width: 45px; height: 45px; background: #10b981; color: white;
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            font-size: 20px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+            border: 2px solid #34d399; transition: all 0.2s ease;
+            z-index: 2; pointer-events: auto;
+        `;
+        btn.onmouseenter = () => { btn.style.transform = "scale(1.2)"; btn.style.background = "#059669"; };
+        btn.onmouseleave = () => { btn.style.transform = "scale(1)"; btn.style.background = "#10b981"; };
+        btn.onclick = (e) => { e.stopPropagation(); openMainPanel(tabName); };
+        return btn;
+    }
+
+    container.appendChild(createIcon("fa-heart", "Здоровье", "tab-health", 0, 37));
+    container.appendChild(createIcon("fa-tint", "Ресурсы", "tab-resources", 65, 0));
+    container.appendChild(createIcon("fa-book", "Дисциплины", "tab-disciplines", 65, 75));
+
+    document.body.appendChild(container);
+
+    // Перетаскивание
+    let isDragging = false;
+    let startX, startY, initialX, initialY;
+
+    container.addEventListener("mousedown", (e) => {
+        if (!e.target.closest('.wod-single-icon')) return;
+        isDragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        initialX = container.offsetLeft;
+        initialY = container.offsetTop;
+        container.style.cursor = "grabbing";
+    });
+
+    document.addEventListener("mousemove", (e) => {
+        if (!isDragging) return;
+        e.preventDefault();
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        container.style.left = `${initialX + dx}px`;
+        container.style.top = `${initialY + dy}px`;
+        container.style.bottom = "auto";
+        container.style.right = "auto";
+    });
+
+    document.addEventListener("mouseup", () => {
+        if (isDragging) {
+            isDragging = false;
+            container.style.cursor = "grab";
+            localStorage.setItem("wod-radial-menu-pos", JSON.stringify({
+                top: container.offsetTop,
+                left: container.offsetLeft
+            }));
+        }
+    });
+});
