@@ -1,6 +1,6 @@
 // ==========================================
 // МОДУЛЬ: WoD Master Panel
-// Файл: scripts/main.js (Версия 2.2 - фикс сеток)
+// Файл: scripts/main.js (Версия 2.3 - фикс стрелок)
 // ==========================================
 
 const CONFIG = {
@@ -193,9 +193,13 @@ function setupPanelLogic(html, isGM) {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = `wod-arrow-btn wod-arrow-${direction}`;
-        const val = (direction === 'down') ? (isDamage ? 7 : -10) : (isDamage ? -7 : 10);
+        
+        // ▼ (down) слева - это нанести максимальный урон / опустошить.
+        // ▲ (up) справа - это вылечить / заполнить до максимума.
         btn.dataset.type = type;
-        btn.dataset.val = val;
+        btn.dataset.isDamage = isDamage;
+        btn.dataset.action = (direction === 'down') ? 'damage' : 'heal';
+        
         btn.innerHTML = direction === 'up' ? '▲' : '▼';
         return btn.outerHTML;
     }
@@ -251,15 +255,15 @@ function setupPanelLogic(html, isGM) {
 
     html.find('.wod-arrow-btn').click(function() {
         const type = $(this).data('type'); 
-        const val = parseInt($(this).data('val'));
+        const action = $(this).data('action'); // 'damage' или 'heal'
         const isHealthTab = $(this).closest('#tab-health').length > 0;
         const npcId = isHealthTab ? (isGM ? html.find('#health-npc-select').val() : "") : (isGM ? html.find('#res-npc-select').val() : "");
 
         if (isHealthTab) {
             const useBlood = html.find('#health-use-blood').is(':checked');
-            processHealthAction(html, type, val, useBlood, npcId, players);
+            processHealthAction(html, type, action, useBlood, npcId, players);
         } else {
-            processResourceAction(html, type, val, npcId, players);
+            processResourceAction(html, type, action, npcId, players);
         }
     });
 
@@ -414,12 +418,26 @@ async function processHealthAction(html, type, value, useBlood, npcId, players) 
     }
     const namesMap = { bashing: "Дробящий", lethal: "Летальный", aggravated: "Аггравированный" };
     let updatedCount = 0, totalBloodCost = 0;
+    
     for (const actor of targets) {
         if (!actor) continue;
         const current = foundry.utils.getProperty(actor, CONFIG.healthPath);
         if (!current) { ui.notifications.warn(`${actor.name}: нет поля Здоровья!`); continue; }
 
-        let b = Number(current.bashing) || 0, l = Number(current.lethal) || 0, a = Number(current.aggravated) || 0, bloodCost = 0;
+        let b = Number(current.bashing) || 0;
+        let l = Number(current.lethal) || 0;
+        let a = Number(current.aggravated) || 0;
+        let bloodCost = 0;
+
+        // Если пришла команда "damage" (стрелка ▼), наносим максимальный урон (забиваем до 7).
+        if (value === "damage") {
+            value = 7; // Максимум
+        } 
+        // Если пришла команда "heal" (стрелка ▲), лечим полностью (убираем весь урон).
+        else if (value === "heal") {
+            value = -7; // Максимум лечения
+        }
+
         if (value > 0) {
             if (type === "bashing") b += value;
             else if (type === "lethal") { const ab = Math.min(value, b); b -= ab; l += value; }
@@ -454,8 +472,14 @@ async function processHealthAction(html, type, value, useBlood, npcId, players) 
     }
     if (updatedCount > 0 || targets.length > 0) {
         let targetName = targets.map(t => t.name).join(', ');
-        let bloodText = totalBloodCost > 0 ? ` (потрачено ${totalBloodCost} Крови)` : (value < 0 && !useBlood ? ` (без траты Крови)` : "");
-        let chatData = { speaker: ChatMessage.getSpeaker(), content: `<p><strong>${targetName}</strong> ${value > 0 ? "получает" : "лечит"} <strong>${Math.abs(value)}</strong> ${namesMap[type]} урона${bloodText}.</p>` };
+        let bloodText = totalBloodCost > 0 ? ` (потрачено ${totalBloodCost} Крови)` : "";
+        
+        // Формируем текст сообщения
+        let actionText = "";
+        if (value > 0 || value === "damage") actionText = "получает";
+        else if (value < 0 || value === "heal") actionText = "лечит";
+
+        let chatData = { speaker: ChatMessage.getSpeaker(), content: `<p><strong>${targetName}</strong> ${actionText} урон (${namesMap[type]})${bloodText}.</p>` };
         
         let whisperTargets = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
         if (!game.user.isGM) whisperTargets.push(game.user.id);
@@ -499,6 +523,9 @@ async function processResourceAction(html, type, value, npcId, players) {
         const max = Number(foundry.utils.getProperty(actor, config.max)) || 10;
         
         let newValue = current + value;
+        if (value === "damage") newValue = 0;
+        else if (value === "heal") newValue = max;
+
         if (newValue < 0) newValue = 0;
         if (newValue > max) newValue = max;
 
@@ -507,7 +534,8 @@ async function processResourceAction(html, type, value, npcId, players) {
             updatedCount++; 
         }
         
-        messageParts.push(`<strong>${actor.name}</strong> (${value > 0 ? "+" : ""}${value} ${config.name} -> Остаток: ${newValue})`);
+        let actionText = (value === "damage") ? "опустошена" : ((value === "heal") ? "восстановлена" : "");
+        messageParts.push(`<strong>${actor.name}</strong> (${config.name} ${actionText} -> Остаток: ${newValue})`);
     }
     
     if (updatedCount > 0) {
