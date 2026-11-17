@@ -1,26 +1,251 @@
-{
-  "id": "wod-master-panel",
-  "title": "WoD Master Panel",
-  "description": "Пульт управления для Мастера и Игроков (Здоровье, Ресурсы, Дисциплины).",
-  "version": "1.2.2",
-  "compatibility": {
-    "minimum": "13",
-    "verified": "14"
-  },
-  "authors": [
-    {
-      "name": "Custom GM Tools"
-    }
-  ],
-  "esmodules": [
-    "scripts/main.js"
-  ],
-  "styles": [
-    "styles/main.css"
-  ],
-  "languages": [],
-  "packs": [],
-  "url": "https://github.com/RadSeraph/wod-master-panel",
-  "manifest": "https://raw.githubusercontent.com/RadSeraph/wod-master-panel/main/module.json",
-  "download": "https://github.com/RadSeraph/wod-master-panel/archive/refs/heads/main.zip"
+/* ==========================================
+   ОСНОВНЫЕ СТИЛИ ДЛЯ ПУЛЬТОВ
+   ========================================== */
+.wod-panel-container {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-family: 'Signika', sans-serif;
+    height: 100%;
+    overflow: hidden;
 }
+
+/* Вкладки */
+.wod-panel-tabs {
+    display: flex;
+    border-bottom: 2px solid #555;
+    margin-bottom: 5px;
+    flex-shrink: 0;
+}
+
+.wod-tab-btn {
+    flex: 1;
+    padding: 4px;
+    background: rgba(0, 0, 0, 0.1);
+    border: 1px solid #444;
+    border-bottom: none;
+    cursor: pointer;
+    font-weight: bold;
+    color: #333;
+    transition: all 0.2s;
+}
+
+.wod-tab-btn.active {
+    background: #2c6b81;
+    color: #fff;
+    border-color: #5bb9d6;
+    box-shadow: 0 -2px 5px rgba(91, 185, 214, 0.3);
+}
+
+.wod-tab-content {
+    display: none;
+    flex-direction: column;
+    gap: 4px;
+    flex-grow: 1;
+}
+
+.wod-tab-content.active {
+    display: flex;
+}
+
+/* Кнопки персонажей */
+.wod-actor-btn {
+    width: 100%;
+    height: 28px;
+    margin-bottom: 2px;
+    border: 1px solid #444;
+    background: rgba(0, 0, 0, 0.05);
+    color: #000;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-sizing: border-box;
+    text-align: center;
+}
+
+.wod-actor-btn:hover {
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.wod-actor-btn.active {
+    background: #2c6b81;
+    color: #fff;
+    border-color: #5bb9d6;
+    box-shadow: 0 0 8px rgba(91, 185, 214, 0.6);
+}
+
+/* Кнопки урона и ресурсов */
+.wod-grid {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 2px;
+    justify-content: space-between; /* Растягиваем кнопки на всю ширину */
+    margin-bottom: 4px;
+    flex-grow: 1; /* Сетка занимает всё свободное место */
+    min-width: 0; /* Важно для flex-элементов, чтобы они могли сжиматься */
+}
+
+.wod-grid-btn {
+    flex: 1 1 0px; /* Кнопки растягиваются равномерно, но могут сжиматься */
+    padding: 5px 0;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: 0.1s;
+    border: 1px solid #333;
+    text-align: center;
+    min-width: 20px; /* Минимальный размер, чтобы цифры не слипались */
+}
+
+.wod-grid-btn:active {
+    transform: scale(0.9);
+}
+
+.wod-btn-heal { background: #2e6b4e; color: #fff; }
+.wod-btn-dmg { background: #8b0000; color: #fff; }
+.wod-btn-blood { background: #1f5c73; color: #fff; }
+.wod-btn-zero { background: #444; color: #ffd700; border: 2px solid #ffd700; }
+
+/* Блок ресурсов */
+.wod-resource-section {
+    border-top: 1px solid #555;
+    padding-top: 4px;
+    margin-bottom: 4px;
+}
+
+.wod-resource-title {
+    font-weight: bold;
+    margin-bottom: 2px;
+    text-align: center;
+    font-size: 13px;
+}
+
+/* Блок требований */
+.wod-req-block {
+    margin-top: 5px;
+    padding: 5px;
+    display: none;
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+    font-size: 0.9em;
+    border-left: 4px solid #8b0000;
+}
+
+/* Итоговая стоимость */
+.wod-final-cost {
+    text-align: center;
+    font-weight: bold;
+    font-size: 1.1em;
+    color: #333;
+    padding: 5px;
+    background: rgba(0, 0, 0, 0.05);
+    border-radius: 4px;
+    border: 1px solid #aaa;
+    margin-top: auto;
+    flex-shrink: 0;
+}
+
+/* Блок описания Дисциплины */
+.wod-desc-block {
+    padding: 5px;
+    background: rgba(0, 0, 0, 0.05);
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    height: 170px;
+    overflow-y: auto;
+    font-size: 0.9em;
+    color: #222;
+    flex-shrink: 0;
+}
+
+/* Стили для кнопок сложности */
+#disc-difficulty-buttons {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+#disc-difficulty-buttons button {
+    flex: 1;
+    padding: 5px 0;
+    background: #1f5c73;
+    color: white;
+    border: 1px solid #333;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: bold;
+    transition: 0.1s;
+}
+
+#disc-difficulty-buttons button:hover {
+    background: #2c6b81;
+}
+
+#disc-difficulty-buttons button.active {
+    background: #10b981;
+    border-color: #34d399;
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.8);
+    color: white;
+}
+
+/* ==========================================
+   СТИЛИ ДЛЯ РАДИАЛЬНОЙ КНОПКИ (ИЗУМРУД)
+   ========================================== */
+#wod-radial-menu {
+    cursor: grab;
+}
+
+#wod-radial-menu:active {
+    cursor: grabbing;
+}
+
+#wod-radial-menu .wod-sub-btn:hover {
+    background: #14b8a6 !important;
+    transform: scale(1.15) !important;
+    box-shadow: 0 0 10px rgba(20, 184, 166, 0.8) !important;
+}
+
+#wod-main-btn:hover {
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.8) !important;
+}
+
+/* ==========================================
+   НОВЫЕ СТИЛИ ДЛЯ СТРЕЛОК И СЕТОК
+   ========================================== */
+.wod-grid-with-arrows {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 4px;
+    width: 100%;
+}
+
+.wod-grid-with-arrows .wod-grid {
+    flex-grow: 1;
+    margin-bottom: 0;
+    min-width: 0; /* Позволяет сетке сжиматься */
+}
+
+.wod-arrow-btn {
+    padding: 4px 4px;
+    font-size: 14px;
+    background: #333;
+    color: #ddd;
+    border: 1px solid #555;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: 0.1s;
+    flex-shrink: 0; /* Стрелки не сжимаются */
+}
+
+.wod-arrow-btn:hover {
+    background: #555;
+    color: #fff;
+}
+
+.wod-arrow-down { color: #e74c3c; }
+.wod-arrow-up { color: #2ecc71; }
