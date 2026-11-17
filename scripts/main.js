@@ -720,12 +720,12 @@ Hooks.on("ready", () => {
     if (savedPos) {
         try {
             const pos = JSON.parse(savedPos);
-            container.style.cssText = `position: fixed; top: ${pos.top}px; left: ${pos.left}px; width: 120px; height: 120px; z-index: 99999; pointer-events: none;`;
+            container.style.cssText = `position: fixed; top: ${pos.top}px; left: ${pos.left}px; width: 120px; height: 120px; z-index: 10; pointer-events: none;`;
         } catch (e) {
-            container.style.cssText = "position: fixed; top: 45%; left: 50px; width: 120px; height: 120px; z-index: 99999; pointer-events: none;";
+            container.style.cssText = "position: fixed; top: 45%; left: 50px; width: 120px; height: 120px; z-index: 10; pointer-events: none;";
         }
     } else {
-        container.style.cssText = "position: fixed; top: 45%; left: 50px; width: 120px; height: 120px; z-index: 99999; pointer-events: none;";
+        container.style.cssText = "position: fixed; top: 45%; left: 50px; width: 120px; height: 120px; z-index: 10; pointer-events: none;";
     }
 
     let isDragging = false;
