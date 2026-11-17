@@ -1,20 +1,19 @@
 // ==========================================
 // МОДУЛЬ: WoD Master Panel
-// Файл: scripts/main.js (Версия 2.0 - с правками)
+// Файл: scripts/main.js (Версия 2.1 - со стрелками)
 // ==========================================
 
 const CONFIG = {
     folderName: "Наше ненадежное будущее",
     bloodPath: "system.advantages.bloodpool.temporary",
     bloodMax: "system.advantages.bloodpool.max",
-    bloodPerTurn: "system.advantages.bloodpool.perturn", // Лимит за ход
+    bloodPerTurn: "system.advantages.bloodpool.perturn",
     willPath: "system.advantages.willpower.temporary",
     willMax: "system.advantages.willpower.max",
     willPerm: "system.advantages.willpower.permanent",
     healthPath: "system.health.damage"
 };
 
-// Вспомогательные функции
 function getPlayerActors() {
     const folder = game.folders.find(f => f.name === CONFIG.folderName && f.type === "Actor");
     if (!folder) return [];
@@ -108,7 +107,6 @@ async function openMainPanel(initialTab = "tab-health") {
         render: (html) => { 
             setupPanelLogic(html, isGM); 
             
-            // Пункт 6: Темно-красная кнопка "Использовать"
             const myButton = $('<button type="button" class="wod-my-use-btn" style="margin-top: 10px; padding: 8px 16px; background: #8b0000; color: white; border: 1px solid #5c0000; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.2s;">Использовать</button>');
             myButton.hover(
                 function() { $(this).css("background", "#a80000"); },
@@ -190,20 +188,37 @@ function setupPanelLogic(html, isGM) {
         }
     }
 
-    // Пункт 4: Урон слева (красный минус), Лечение справа (зеленый плюс)
+    // Функция создания стрелок
+    function createArrowBtn(direction, type, isDamage) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = `wod-arrow-btn wod-arrow-${direction}`;
+        // ▼ (down) слева - урон/опустошить. ▲ (up) справа - лечение/заполнить.
+        const val = (direction === 'down') ? (isDamage ? 7 : -10) : (isDamage ? -7 : 10);
+        btn.dataset.type = type;
+        btn.dataset.val = val;
+        btn.innerHTML = direction === 'up' ? '▲' : '▼';
+        return btn.outerHTML;
+    }
+
     function createGrid(targetId, type, isDamage) {
         let htmlGrid = "";
+        let innerGrid = "";
+
         if (isDamage) {
-            for (let i = -7; i <= -1; i++) htmlGrid += `<button type="button" class="wod-grid-btn wod-btn-dmg" data-type="${type}" data-val="${i}">${i}</button>`;
-            for (let i = 1; i <= 7; i++) htmlGrid += `<button type="button" class="wod-grid-btn wod-btn-heal" data-type="${type}" data-val="${i}">+${i}</button>`;
+            for (let i = -7; i <= -1; i++) innerGrid += `<button type="button" class="wod-grid-btn wod-btn-dmg" data-type="${type}" data-val="${i}">${i}</button>`;
+            for (let i = 1; i <= 7; i++) innerGrid += `<button type="button" class="wod-grid-btn wod-btn-heal" data-type="${type}" data-val="${i}">+${i}</button>`;
+            htmlGrid = createArrowBtn('down', type, true) + `<div class="wod-grid">${innerGrid}</div>` + createArrowBtn('up', type, true);
         } else {
             for (let i = -10; i <= 10; i++) {
                 let cls = i === 0 ? 'wod-btn-zero' : 'wod-btn-blood';
-                htmlGrid += `<button type="button" class="wod-grid-btn ${cls}" data-type="${type}" data-val="${i}">${i > 0 ? '+' + i : i}</button>`;
+                innerGrid += `<button type="button" class="wod-grid-btn ${cls}" data-type="${type}" data-val="${i}">${i > 0 ? '+' + i : i}</button>`;
             }
+            htmlGrid = createArrowBtn('down', type, false) + `<div class="wod-grid">${innerGrid}</div>` + createArrowBtn('up', type, false);
         }
-        html.find(targetId).html(htmlGrid);
+        html.find(targetId).html(`<div class="wod-grid-with-arrows">${htmlGrid}</div>`);
     }
+    
     createGrid('#grid-bashing', 'bashing', true);
     createGrid('#grid-lethal', 'lethal', true);
     createGrid('#grid-aggravated', 'aggravated', true);
@@ -233,6 +248,20 @@ function setupPanelLogic(html, isGM) {
         const type = $(this).data('type'); const val = parseInt($(this).data('val'));
         const npcId = isGM ? html.find('#res-npc-select').val() : "";
         processResourceAction(html, type, val, npcId, players);
+    });
+
+    html.find('.wod-arrow-btn').click(function() {
+        const type = $(this).data('type'); 
+        const val = parseInt($(this).data('val'));
+        const isHealthTab = $(this).closest('#tab-health').length > 0;
+        const npcId = isHealthTab ? (isGM ? html.find('#health-npc-select').val() : "") : (isGM ? html.find('#res-npc-select').val() : "");
+
+        if (isHealthTab) {
+            const useBlood = html.find('#health-use-blood').is(':checked');
+            processHealthAction(html, type, val, useBlood, npcId, players);
+        } else {
+            processResourceAction(html, type, val, npcId, players);
+        }
     });
 
     const diffContainer = html.find('#disc-difficulty-buttons');
@@ -346,7 +375,7 @@ function setupPanelLogic(html, isGM) {
         if (html.find('#disc-use-will').is(':checked')) wCost += 1;
 
         let parts = [];
-        if (bCost > 0) parts.push(`<span style="color: #8b0000; font-weight: bold;">${bCost} Кровь</span>`); // Пункт 7
+        if (bCost > 0) parts.push(`<span style="color: #8b0000; font-weight: bold;">${bCost} Кровь</span>`);
         if (wCost > 0) parts.push(`${wCost} Воля`);
 
         if (parts.length > 0) html.find('#disc-final-cost').html(`Итоговая стоимость: ${parts.join(' | ')}`);
@@ -389,7 +418,7 @@ async function processHealthAction(html, type, value, useBlood, npcId, players) 
     for (const actor of targets) {
         if (!actor) continue;
         const current = foundry.utils.getProperty(actor, CONFIG.healthPath);
-        if (!current) { ui.notifications.warn(`${actor.name}: нет поля Здоровья!`); continue; } // Пункт 3
+        if (!current) { ui.notifications.warn(`${actor.name}: нет поля Здоровья!`); continue; }
 
         let b = Number(current.bashing) || 0, l = Number(current.lethal) || 0, a = Number(current.aggravated) || 0, bloodCost = 0;
         if (value > 0) {
@@ -416,7 +445,7 @@ async function processHealthAction(html, type, value, useBlood, npcId, players) 
                 if (bNum < bloodCost) { ui.notifications.warn(`${actor.name}: мало Крови!`); canUpdate = false; }
                 else { await actor.update({ [CONFIG.bloodPath]: bNum - bloodCost }); totalBloodCost += bloodCost; }
             } else {
-                ui.notifications.warn(`${actor.name}: нет поля Крови!`); canUpdate = false; // Пункт 3
+                ui.notifications.warn(`${actor.name}: нет поля Крови!`); canUpdate = false;
             }
         }
         if (canUpdate && (b !== current.bashing || l !== current.lethal || a !== current.aggravated)) {
@@ -451,7 +480,6 @@ async function processResourceAction(html, type, value, npcId, players) {
             activeBtns.each(function() { targets.push(game.actors.get($(this).data('id'))); });
         }
     }
-    // Пункт 1: Исправлен max для Воли
     const paths = { 
         blood: { path: CONFIG.bloodPath, max: CONFIG.bloodMax, name: "Кровь" }, 
         will: { path: CONFIG.willPath, max: CONFIG.willPerm, name: "Волю" } 
@@ -463,7 +491,7 @@ async function processResourceAction(html, type, value, npcId, players) {
     for (const actor of targets) {
         if (!actor) continue;
         const current = Number(foundry.utils.getProperty(actor, config.path));
-        if (isNaN(current)) { ui.notifications.warn(`${actor.name}: нет ресурса (${config.name})!`); continue; } // Пункт 3
+        if (isNaN(current)) { ui.notifications.warn(`${actor.name}: нет ресурса (${config.name})!`); continue; }
 
         const max = Number(foundry.utils.getProperty(actor, config.max)) || 10;
         
@@ -521,7 +549,6 @@ async function executeDiscipline(html) {
     if (willMatch) { if (willMatch[1].toLowerCase() === "x" && inputWillX.length) finalWill = parseInt(inputWillX.val()) || 1; else finalWill = parseInt(willMatch[1]); }
     if (useWillpower) finalWill += 1; 
 
-    // Пункт 2: Проверка лимита траты Крови за ход
     if (finalBlood > 0) {
         const perTurn = Number(foundry.utils.getProperty(actor, CONFIG.bloodPerTurn)) || 1;
         if (finalBlood > perTurn) {
@@ -537,21 +564,21 @@ async function executeDiscipline(html) {
                     close: () => resolve(false)
                 }).render(true);
             });
-            if (!confirm) return; // Прерываем выполнение, если отмена
+            if (!confirm) return;
         }
     }
 
     let resourceHTML = "";
     if (finalBlood > 0) {
         const curB = Number(foundry.utils.getProperty(actor, CONFIG.bloodPath));
-        if (isNaN(curB)) return ui.notifications.error(`${actor.name}: нет пула Крови!`); // Пункт 3
+        if (isNaN(curB)) return ui.notifications.error(`${actor.name}: нет пула Крови!`);
         if (curB < finalBlood) return ui.notifications.error(`${actor.name}: мало Крови!`);
         await actor.update({ [CONFIG.bloodPath]: curB - finalBlood });
         resourceHTML += `<p style="color: #8b0000; margin: 2px 0;"><em>Потрачено ${finalBlood} Крови (осталось ${curB - finalBlood}).</em></p>`;
     }
     if (finalWill > 0) {
         const curW = Number(foundry.utils.getProperty(actor, CONFIG.willPath));
-        if (isNaN(curW)) return ui.notifications.error(`${actor.name}: нет пула Воли!`); // Пункт 3
+        if (isNaN(curW)) return ui.notifications.error(`${actor.name}: нет пула Воли!`);
         if (curW < finalWill) return ui.notifications.error(`${actor.name}: мало Воли!`);
         await actor.update({ [CONFIG.willPath]: curW - finalWill });
         resourceHTML += `<p style="color: #00008b; margin: 2px 0;"><em>Потрачено ${finalWill} Воли (осталось ${curW - finalWill}).</em></p>`;
@@ -606,7 +633,6 @@ async function executeDiscipline(html) {
             if (useWillpower) {
                 net += 1;
                 if (netFromDice === 0) {
-                    // Пункт 8: Убраны скобки
                     resultTextHTML = `<div style="margin-top: 8px; font-size: 1.2em; font-weight: bold; color: #2e6b4e;">Успехи: ${net}</div>
                                       <div style="margin-top: 4px; font-size: 0.9em; font-style: italic; color: #00008b;">Лишь сильная воля помогает преодолеть трудности!</div>`;
                 } else {
@@ -676,6 +702,10 @@ Hooks.on("ready", () => {
         container.style.cssText = "position: fixed; top: 45%; left: 50px; width: 120px; height: 120px; z-index: 9999; pointer-events: none;";
     }
 
+    let isDragging = false;
+    let hasMoved = false;
+    let startX, startY, initialX, initialY;
+
     function createIcon(icon, title, tabName, top, left) {
         const btn = document.createElement("div");
         btn.className = "wod-single-icon";
@@ -691,11 +721,13 @@ Hooks.on("ready", () => {
         `;
         btn.onmouseenter = () => { btn.style.transform = "scale(1.2)"; btn.style.background = "#059669"; };
         btn.onmouseleave = () => { btn.style.transform = "scale(1)"; btn.style.background = "#10b981"; };
-        btn.onclick = (e) => { 
-            e.stopPropagation(); 
-            // Пункт 9: Игнорируем клик, если было перетаскивание
-            if (!isDragging) openMainPanel(tabName); 
-        };
+        
+        btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            if (!hasMoved) {
+                openMainPanel(tabName);
+            }
+        });
         return btn;
     }
 
@@ -705,12 +737,10 @@ Hooks.on("ready", () => {
 
     document.body.appendChild(container);
 
-    let isDragging = false;
-    let startX, startY, initialX, initialY;
-
     container.addEventListener("mousedown", (e) => {
         if (!e.target.closest('.wod-single-icon')) return;
-        isDragging = false; // Сбрасываем флаг
+        isDragging = true;
+        hasMoved = false; 
         startX = e.clientX;
         startY = e.clientY;
         initialX = container.offsetLeft;
@@ -719,15 +749,11 @@ Hooks.on("ready", () => {
     });
 
     document.addEventListener("mousemove", (e) => {
-        if (!e.target.closest('.wod-single-icon') && !container.style.cursor) return;
-        if (!container.style.cursor) return;
-
+        if (!isDragging) return;
         const dx = e.clientX - startX;
         const dy = e.clientY - startY;
-        
-        // Пункт 9: Если сдвинули больше 3 пикселей, это перетаскивание
-        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
-            isDragging = true;
+        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
+            hasMoved = true;
             e.preventDefault();
             container.style.left = `${initialX + dx}px`;
             container.style.top = `${initialY + dy}px`;
@@ -737,9 +763,10 @@ Hooks.on("ready", () => {
     });
 
     document.addEventListener("mouseup", () => {
-        if (container.style.cursor === "grabbing") {
+        if (isDragging) {
+            isDragging = false;
             container.style.cursor = "grab";
-            if (isDragging) {
+            if (hasMoved) {
                 localStorage.setItem("wod-radial-menu-pos", JSON.stringify({
                     top: container.offsetTop,
                     left: container.offsetLeft
