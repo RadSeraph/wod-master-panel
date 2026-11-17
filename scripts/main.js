@@ -490,8 +490,12 @@ async function processResourceAction(html, type, value, npcId, players) {
 
     for (const actor of targets) {
         if (!actor) continue;
-        const current = Number(foundry.utils.getProperty(actor, config.path));
-        if (isNaN(current)) { ui.notifications.warn(`${actor.name}: нет ресурса (${config.name})!`); continue; }
+                const rawValue = foundry.utils.getProperty(actor, config.path);
+        if (rawValue === undefined || rawValue === null) { 
+            ui.notifications.warn(`${actor.name}: нет ресурса (${config.name})!`); 
+            continue; 
+        }
+        const current = Number(rawValue) || 0;
 
         const max = Number(foundry.utils.getProperty(actor, config.max)) || 10;
         
