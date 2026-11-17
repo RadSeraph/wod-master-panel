@@ -1,6 +1,6 @@
 // ==========================================
 // МОДУЛЬ: WoD Master Panel
-// Файл: scripts/main.js (Версия 2.3 - фикс стрелок)
+// Файл: scripts/main.js (Версия 2.4 - фикс кнопок и Z-index)
 // ==========================================
 
 const CONFIG = {
@@ -194,8 +194,6 @@ function setupPanelLogic(html, isGM) {
         btn.type = "button";
         btn.className = `wod-arrow-btn wod-arrow-${direction}`;
         
-        // ▼ (down) слева - это нанести максимальный урон / опустошить.
-        // ▲ (up) справа - это вылечить / заполнить до максимума.
         btn.dataset.type = type;
         btn.dataset.isDamage = isDamage;
         btn.dataset.action = (direction === 'down') ? 'damage' : 'heal';
@@ -209,10 +207,16 @@ function setupPanelLogic(html, isGM) {
         let innerGrid = "";
 
         if (isDamage) {
-            for (let i = -7; i <= -1; i++) innerGrid += `<button type="button" class="wod-grid-btn wod-btn-dmg" data-type="${type}" data-val="${i}">${i}</button>`;
-            for (let i = 1; i <= 7; i++) innerGrid += `<button type="button" class="wod-grid-btn wod-btn-heal" data-type="${type}" data-val="${i}">+${i}</button>`;
+            // ВАЖНО: Левая кнопка (-1) наносит урон (+1 в системе). Правая (+1) лечит (-1 в системе).
+            for (let i = -7; i <= -1; i++) {
+                innerGrid += `<button type="button" class="wod-grid-btn wod-btn-dmg" data-type="${type}" data-val="${Math.abs(i)}">${i}</button>`;
+            }
+            for (let i = 1; i <= 7; i++) {
+                innerGrid += `<button type="button" class="wod-grid-btn wod-btn-heal" data-type="${type}" data-val="${-i}">+${i}</button>`;
+            }
             htmlGrid = createArrowBtn('down', type, true) + `<div class="wod-grid">${innerGrid}</div>` + createArrowBtn('up', type, true);
         } else {
+            // Для ресурсов всё логично: минус тратит, плюс восстанавливает.
             for (let i = -10; i <= 10; i++) {
                 let cls = i === 0 ? 'wod-btn-zero' : 'wod-btn-blood';
                 innerGrid += `<button type="button" class="wod-grid-btn ${cls}" data-type="${type}" data-val="${i}">${i > 0 ? '+' + i : i}</button>`;
@@ -255,7 +259,7 @@ function setupPanelLogic(html, isGM) {
 
     html.find('.wod-arrow-btn').click(function() {
         const type = $(this).data('type'); 
-        const action = $(this).data('action'); // 'damage' или 'heal'
+        const action = $(this).data('action'); 
         const isHealthTab = $(this).closest('#tab-health').length > 0;
         const npcId = isHealthTab ? (isGM ? html.find('#health-npc-select').val() : "") : (isGM ? html.find('#res-npc-select').val() : "");
 
@@ -429,21 +433,16 @@ async function processHealthAction(html, type, value, useBlood, npcId, players) 
         let a = Number(current.aggravated) || 0;
         let bloodCost = 0;
 
-        // Если пришла команда "damage" (стрелка ▼), наносим максимальный урон (забиваем до 7).
-        if (value === "damage") {
-            value = 7; // Максимум
-        } 
-        // Если пришла команда "heal" (стрелка ▲), лечим полностью (убираем весь урон).
-        else if (value === "heal") {
-            value = -7; // Максимум лечения
-        }
+        let processValue = value;
+        if (value === "damage") processValue = 7;
+        else if (value === "heal") processValue = -7;
 
-        if (value > 0) {
-            if (type === "bashing") b += value;
-            else if (type === "lethal") { const ab = Math.min(value, b); b -= ab; l += value; }
-            else if (type === "aggravated") { const ab = Math.min(value, b); b -= ab; const al = Math.min(value - ab, l); l -= al; a += value; }
+        if (processValue > 0) {
+            if (type === "bashing") b += processValue;
+            else if (type === "lethal") { const ab = Math.min(processValue, b); b -= ab; l += processValue; }
+            else if (type === "aggravated") { const ab = Math.min(processValue, b); b -= ab; const al = Math.min(processValue - ab, l); l -= al; a += processValue; }
         } else {
-            const h = Math.abs(value);
+            const h = Math.abs(processValue);
             if (type === "aggravated") { const ah = Math.min(a, h); bloodCost = ah * 5; a -= ah; }
             else if (type === "lethal") { const ah = Math.min(l, h); bloodCost = ah * 1; l -= ah; }
             else if (type === "bashing") { const ah = Math.min(b, h); bloodCost = ah * 1; b -= ah; }
@@ -473,11 +472,7 @@ async function processHealthAction(html, type, value, useBlood, npcId, players) 
     if (updatedCount > 0 || targets.length > 0) {
         let targetName = targets.map(t => t.name).join(', ');
         let bloodText = totalBloodCost > 0 ? ` (потрачено ${totalBloodCost} Крови)` : "";
-        
-        // Формируем текст сообщения
-        let actionText = "";
-        if (value > 0 || value === "damage") actionText = "получает";
-        else if (value < 0 || value === "heal") actionText = "лечит";
+        let actionText = (value > 0 || value === "damage") ? "получает" : "лечит";
 
         let chatData = { speaker: ChatMessage.getSpeaker(), content: `<p><strong>${targetName}</strong> ${actionText} урон (${namesMap[type]})${bloodText}.</p>` };
         
@@ -725,12 +720,12 @@ Hooks.on("ready", () => {
     if (savedPos) {
         try {
             const pos = JSON.parse(savedPos);
-            container.style.cssText = `position: fixed; top: ${pos.top}px; left: ${pos.left}px; width: 120px; height: 120px; z-index: 9999; pointer-events: none;`;
+            container.style.cssText = `position: fixed; top: ${pos.top}px; left: ${pos.left}px; width: 120px; height: 120px; z-index: 99999; pointer-events: none;`;
         } catch (e) {
-            container.style.cssText = "position: fixed; top: 45%; left: 50px; width: 120px; height: 120px; z-index: 9999; pointer-events: none;";
+            container.style.cssText = "position: fixed; top: 45%; left: 50px; width: 120px; height: 120px; z-index: 99999; pointer-events: none;";
         }
     } else {
-        container.style.cssText = "position: fixed; top: 45%; left: 50px; width: 120px; height: 120px; z-index: 9999; pointer-events: none;";
+        container.style.cssText = "position: fixed; top: 45%; left: 50px; width: 120px; height: 120px; z-index: 99999; pointer-events: none;";
     }
 
     let isDragging = false;
