@@ -1,11 +1,16 @@
 // ==========================================
 // МОДУЛЬ: WoD Master Panel
-// Файл: scripts/main.js (Версия 3.0 - единая суммирующаяся шкала на 7 ячеек:
+// Файл: scripts/main.js (Версия 3.1 - единая суммирующаяся шкала на 7 ячеек:
 // все типы урона занимают общие ячейки; новый тип заполняет только свободные
 // ячейки и не может вытеснить уже нанесённый урон; при переполнении избыток
 // повышается по тяжести: дробящий -> летальный, летальный -> аггравированный,
-// а если повышать дальше некуда — избыток аггравированного теряется)
+// а если повышать дальше некуда — избыток аггравированного теряется).
+// ВЕРСИЯ 3.1: слит с модулем wod-firearms-test (стрельба) — логика ран общая
+// (материнская панель первична), стрельба стала вкладкой «Огонь» основного
+// пульта, ромбовидное меню получило четвёртую кнопку.
 // ==========================================
+
+const MODULE_ID = "wod-master-panel";
 
 const CONFIG = {
     folderName: "Наше ненадежное будущее",
@@ -52,6 +57,13 @@ const WOUND_PENALTIES = {
 
 // Индексы состояний по суммарному количеству урона (фолбэк-таблица)
 const WOUND_BY_DAMAGE = ["bruised", "battered", "injured", "wounded", "disabled", "dying", "incapacitated"];
+
+// Режимы стрельбы (унаследовано из wod-firearms-test)
+const FIRE_MODES = {
+    single: { label: "Одиночный", cost: 1, bonus: 0, diffMod: 0, isBurst: false },
+    short:  { label: "Короткая очередь", cost: 3, bonus: 2, diffMod: 1, isBurst: true },
+    long:   { label: "Длинная очередь", cost: "ALL", bonus: 10, diffMod: 2, isBurst: true }
+};
 
 function getWoundInfo(actor) {
     const health = foundry.utils.getProperty(actor, CONFIG.healthPath);
@@ -195,7 +207,7 @@ function createDiceHTML(value, resultType) {
 
 async function openMainPanel(initialTab = "tab-health") {
     const isGM = game.user.isGM;
-    const template = await renderTemplate("modules/wod-master-panel/templates/panel.html", {});
+    const template = await renderTemplate(`modules/${MODULE_ID}/templates/panel.html`, {});
 
     const dialog = new Dialog({
         title: "WoD Master Panel",
@@ -205,6 +217,7 @@ async function openMainPanel(initialTab = "tab-health") {
         },
         render: (html) => {
             setupPanelLogic(html, isGM);
+            setupFirearmsLogic(html, isGM);
 
             const myButton = $('<button type="button" class="wod-my-use-btn" style="margin-top: 10px; padding: 8px 16px; background: #8b0000; color: white; border: 1px solid #5c0000; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.2s;">Использовать</button>');
             myButton.hover(
@@ -855,6 +868,340 @@ async function executeDiscipline(html) {
     ChatMessage.create(chatData);
 }
 
+// ==========================================
+// СТРЕЛЬБА (унаследовано из wod-firearms-test v1.4.0)
+// Логика ран — общая, из материнского модуля (getWoundInfo/WOUND_PENALTIES).
+// Панель стрельбы — вкладка «Огонь» основного пульта; отдельной плавающей
+// кнопки больше нет. Воля списывается через CONFIG.willPath (как в панели).
+// ==========================================
+
+function setupFirearmsLogic(html, isGM) {
+    const tab = html.find('#tab-firearms');
+    if (!tab.length) return;
+
+    // --- Список персонажей для стрельбы ---
+    if (isGM) {
+        let npcOptions = `<option value="">Не выбрано</option>`;
+        game.actors.filter(a => a.type === "Vampire" || a.type === "Mortal")
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .forEach(n => npcOptions += `<option value="${n.id}">${escapeHtml(n.name)}</option>`);
+        tab.find('#fire-npc-select').html(npcOptions);
+        tab.find('#fire-npc-block').show();
+        tab.find('#fire-actor-block').hide();
+    } else {
+        const actor = game.user.character;
+        tab.find('#fire-actor-block').show().find('label').hide();
+        if (actor) tab.find('#fire-actor-select').html(`<option value="${actor.id}">${escapeHtml(actor.name)}</option>`);
+    }
+
+    // --- Кнопки сложности (3..10), как во вкладке Дисциплин ---
+    const fireDiffContainer = tab.find('#fire-difficulty-buttons');
+    const fireDiffInput = tab.find('#fire-difficulty');
+    const renderFireDifficultyButtons = (currentDiff) => {
+        fireDiffContainer.empty();
+        for (let i = 3; i <= 10; i++) {
+            const isActive = i === currentDiff;
+            const btn = $(`<button type="button" class="wod-diff-btn ${isActive ? 'active' : ''}" data-val="${i}">${i}</button>`);
+            btn.click(function() {
+                const val = $(this).data('val');
+                fireDiffInput.val(val);
+                renderFireDifficultyButtons(val);
+            });
+            fireDiffContainer.append(btn);
+        }
+    };
+    renderFireDifficultyButtons(6);
+
+    const getActor = () => {
+        const actorId = isGM ? tab.find('#fire-npc-select').val() : (game.user.character?.id || tab.find('#fire-actor-select').val());
+        return game.actors.get(actorId);
+    };
+
+    const updateAmmoInfo = (weapon) => {
+        if (!weapon) return tab.find('#fire-ammo-info').text("В магазине: 0 / 0");
+        const clip = weapon.system.clip || { value: 0, max: 0 };
+        tab.find('#fire-ammo-info').text(`В магазине: ${clip.value} / ${clip.max}`);
+    };
+
+    const renderModeButtons = (weapon) => {
+        const container = tab.find('#fire-mode-buttons');
+        container.empty();
+        if (!weapon) return;
+
+        const modeObj = weapon.system.mode || {};
+        const hasBurst = modeObj.hasburst || false;
+        const hasFullAuto = modeObj.hasfullauto || false;
+        const weaponDiff = parseInt(weapon.system.difficulty || 6);
+
+        Object.entries(FIRE_MODES).forEach(([key, mode]) => {
+            const isDisabled = (key === "short" && !hasBurst) || (key === "long" && !hasFullAuto);
+            const btn = $(`<button type="button" class="wod-mode-btn ${key === 'single' ? 'active' : ''}" data-mode="${key}" ${isDisabled ? 'disabled' : ''}>${mode.label}</button>`);
+            btn.click(function() {
+                if ($(this).prop('disabled')) return;
+                container.find('.wod-mode-btn').removeClass('active');
+                $(this).addClass('active');
+                renderFireDifficultyButtons(weaponDiff + mode.diffMod);
+            });
+            container.append(btn);
+        });
+    };
+
+    const updateWeapons = () => {
+        const actor = getActor();
+        if (!actor) {
+            tab.find('#fire-weapon-select').html(`<option value="">Не выбрано</option>`);
+            tab.find('#fire-mode-buttons').empty();
+            tab.find('#fire-ammo-info').text("В магазине: 0 / 0");
+            return;
+        }
+        const weapons = actor.items.filter(i => i.type === "Ranged Weapon");
+        let options = `<option value="">Не выбрано</option>`;
+        weapons.forEach(w => options += `<option value="${w.id}">${escapeHtml(w.name)}</option>`);
+        tab.find('#fire-weapon-select').html(options);
+        tab.find('#fire-mode-buttons').empty();
+        updateAmmoInfo(null);
+    };
+
+    if (isGM) tab.find('#fire-npc-select').change(updateWeapons);
+    else tab.find('#fire-actor-select').change(updateWeapons);
+
+    tab.find('#fire-weapon-select').change(function() {
+        const actor = getActor();
+        const weapon = actor?.items.get($(this).val());
+        updateAmmoInfo(weapon);
+        renderModeButtons(weapon);
+    });
+
+    tab.find('.fire-dmg-type-btn').click(function() {
+        tab.find('.fire-dmg-type-btn').removeClass('active').css({ background: '', color: '' });
+        $(this).addClass('active').css({ background: '#2c6b81', color: 'white' });
+    });
+
+    tab.find('#fire-btn').off('click').on('click', () => {
+        safeRun("выстрел", () => executeFirearmAttack(tab, getActor));
+    });
+
+    updateWeapons();
+}
+
+async function executeFirearmAttack(tab, getActor) {
+    const isGM = game.user.isGM;
+    const actor = getActor();
+    if (!actor) return ui.notifications.error("Выберите персонажа!");
+    const weapon = actor.items.get(tab.find('#fire-weapon-select').val());
+    if (!weapon) return ui.notifications.error("Выберите оружие!");
+
+    const mode = tab.find('.wod-mode-btn.active').data('mode') || "single";
+    const config = FIRE_MODES[mode];
+    const clip = weapon.system.clip || { value: 0, max: 0 };
+
+    if (mode === "long" && clip.value <= clip.max / 2) return ui.notifications.error("Слишком мало патронов для длинной очереди!");
+    if (mode !== "long" && clip.value < config.cost) return ui.notifications.error("Недостаточно патронов!");
+
+    const useWill = tab.find('#fire-use-will').is(':checked');
+    const isBlind = tab.find('#fire-blind-roll').is(':checked');
+    const ignoreWounds = tab.find('#fire-ignore-wounds').is(':checked');
+    const manualBonus = Number(tab.find('#fire-manual-bonus').val()) || 0;
+    const finalDiff = Number(tab.find('#fire-difficulty').val()) || 6;
+    const damageType = tab.find('.fire-dmg-type-btn.active').data('val') || "lethal";
+
+    // --- ПРОВЕРКА ВОЛИ (путь берётся из CONFIG, как во всём пульте) ---
+    if (useWill) {
+        const curWP = Number(foundry.utils.getProperty(actor, CONFIG.willPath)) || 0;
+        if (curWP <= 0) return ui.notifications.error(`${actor.name}: недостаточно Воли!`);
+    }
+
+    const attrKey = weapon.system.attack?.attribute || "dexterity";
+    const abilityKey = weapon.system.attack?.ability || "firearms";
+    const attrObj = actor.system.attributes?.[attrKey] || {};
+    const attrVal = attrObj.total ?? attrObj.value ?? 0;
+    const abilityVal = actor.system.abilities?.[abilityKey]?.value || 0;
+    const accuracy = weapon.system.attack?.accuracy || 0;
+    const specialty = actor.system.abilities?.[abilityKey]?.speciality || "";
+
+    // --- ШТРАФ ОТ РАН: единая логика материнской панели (v1.3.6+) ---
+    const wound = getWoundInfo(actor);
+    let woundPenalty = 0;
+    let woundStateName = wound.stateName;
+    if (!ignoreWounds) {
+        // При смерти бросок невозможен — блокируем действие и сообщаем в чат.
+        if (wound.dying) {
+            const incapData = { speaker: ChatMessage.getSpeaker({ actor }), content: `<p><strong>${escapeHtml(actor.name)}</strong> находится при смерти (${woundStateName}) и не может совершать действия.</p>` };
+            return ChatMessage.create(incapData);
+        }
+        woundPenalty = wound.penalty;
+    }
+
+    const basePool = attrVal + abilityVal + accuracy + config.bonus + woundPenalty;
+    const finalPool = Math.max(0, Math.floor(basePool + manualBonus));
+
+    if (finalPool <= 0) {
+        const failData = { speaker: ChatMessage.getSpeaker({ actor }), content: `<p><strong>${escapeHtml(actor.name)}</strong> пытается выстрелить из ${escapeHtml(weapon.name)}, но пул кубов равен 0${ignoreWounds ? '' : ` (Штраф от ран: ${woundPenalty})`}. Действие провалено.</p>` };
+        if (isBlind) { failData.blind = true; failData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id); }
+        return ChatMessage.create(failData);
+    }
+
+    const newClipValue = Math.max(0, clip.value - (config.cost === "ALL" ? clip.value : config.cost));
+    await weapon.update({ "system.clip.value": newClipValue });
+
+    const roll = new Roll(`${finalPool}d10`);
+    await roll.evaluate();
+    if (game.dice3d && !isBlind) await game.dice3d.showForRoll(roll, game.user, true, null, false);
+
+    let rawSucc = 0, ones = 0, diceHTML = "";
+    for (const die of roll.dice[0].results) {
+        const isSucc = die.result >= finalDiff;
+        const isOne = die.result === 1;
+        const isSpec = (die.result === 10 && specialty);
+        if (isSucc) rawSucc += isSpec ? 2 : 1;
+        if (isOne) ones++;
+        diceHTML += createDiceHTML(die.result, isSucc ? (isSpec ? 'spec' : 'success') : (isOne ? 'fail' : 'neutral'));
+    }
+
+    let netSucc = Math.max(0, rawSucc - ones);
+    let willText = "";
+
+    if (useWill) {
+        if (rawSucc === 0) {
+            willText = `<div style="color: #2c6b81; font-weight: bold; margin-top: 5px; font-style: italic;">Лишь сильная воля помогает преодолеть трудности!</div>`;
+        }
+        netSucc += 1;
+        const curWP = Number(foundry.utils.getProperty(actor, CONFIG.willPath)) || 0;
+        await actor.update({ [CONFIG.willPath]: Math.max(0, curWP - 1) });
+    }
+
+    let resultText = "";
+    if (rawSucc === 0 && ones > 0 && !useWill) resultText = `<div style="color: #d32f2f; font-weight: bold; margin-top: 5px;">ПРОВАЛ (Ботч)</div>`;
+    else if (netSucc === 0) resultText = `<div style="color: #7f8c8d; font-weight: bold; margin-top: 5px;">ПРОМАХ</div>`;
+    else resultText = `<div style="color: #2e6b4e; font-weight: bold; margin-top: 5px;">Успехи: ${netSucc}</div>`;
+
+    const attackHtml = await renderTemplate(`modules/${MODULE_ID}/templates/chat-fire-attack.html`, {
+        actorName: escapeHtml(actor.name),
+        weaponName: escapeHtml(weapon.name),
+        pool: `${attrKey} (${attrVal}) + ${abilityKey} (${abilityVal}) ${accuracy ? `+ Acc (${accuracy})` : ''} ${config.bonus ? `+ Режим (${config.bonus})` : ''} ${woundPenalty ? `Штраф ран: ${woundStateName} (${woundPenalty})` : ''} ${manualBonus ? `+ Вручную (${manualBonus})` : ''} = ${finalPool}`,
+        difficulty: finalDiff,
+        diceHTML: diceHTML + resultText + willText
+    });
+
+    const chatData = { speaker: ChatMessage.getSpeaker({ actor }), content: attackHtml };
+    if (isBlind) { chatData.blind = true; chatData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id); }
+    await ChatMessage.create(chatData);
+
+    if (netSucc > 0) {
+        setTimeout(() => openDamageDialog(actor, weapon, netSucc, damageType, isBlind), 600);
+    }
+}
+
+async function openDamageDialog(actor, weapon, attackSuccesses, damageType, isBlindAttack) {
+    const baseDamage = weapon.system.damage?.bonus || 0;
+
+    let diffBtnsHTML = "";
+    for (let i = 3; i <= 10; i++) {
+        diffBtnsHTML += `<button type="button" class="wod-diff-btn ${i === 6 ? 'active' : ''}" data-val="${i}">${i}</button>`;
+    }
+
+    const dialogContent = `
+        <div style="font-family: 'Signika', sans-serif; padding: 5px;">
+            <h3 style="margin-top: 0; color: #8b0000; border-bottom: 1px solid #ccc; padding-bottom: 5px;">${escapeHtml(weapon.name)}</h3>
+
+            <div style="margin-bottom: 10px; font-size: 0.95em;">
+                <strong>Базовый урон:</strong> ${baseDamage} (${damageType})<br>
+                <strong>Успехи атаки:</strong> ${attackSuccesses}
+            </div>
+
+            <div style="margin-bottom: 10px; padding: 8px; background: rgba(139,0,0,0.1); border-radius: 4px; border: 1px solid #ccc;">
+                <label style="font-weight: bold; font-size: 13px; color: #8b0000;">Успехи защиты (Уклонение/Парирование):</label>
+                <input type="number" class="wod-defense-succ" value="0" min="0" style="width: 100%; padding: 4px; border: 1px solid #999; border-radius: 4px; margin-top: 4px;">
+            </div>
+
+            <div style="margin-bottom: 10px;">
+                <label style="font-weight: bold; font-size: 13px;">Сложность урона:</label>
+                <div class="wod-dmg-diff-container" style="display: flex; gap: 4px; margin-top: 4px;">${diffBtnsHTML}</div>
+                <input type="hidden" class="wod-dmg-diff-input" value="6">
+            </div>
+
+            <div style="margin-bottom: 10px;">
+                <label style="font-weight: bold; font-size: 13px;">Бонус/Штраф кубов:</label>
+                <input type="number" class="wod-dmg-manual-bonus" value="0" style="width: 100%; padding: 4px; border: 1px solid #999; border-radius: 4px; margin-top: 4px;">
+            </div>
+
+            <div style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
+                <button type="button" class="wod-roll-dmg-btn" style="background: #8b0000; color: white; padding: 6px 15px; border: 1px solid #5c0000; cursor: pointer; font-weight: bold; border-radius:4px;">Бросок урона</button>
+                <button type="button" class="wod-cancel-dmg-btn" style="background: #444; color: white; padding: 6px 15px; border: 1px solid #222; cursor: pointer; font-weight: bold; border-radius:4px;">Отмена</button>
+            </div>
+        </div>
+    `;
+
+    new Dialog({
+        title: `${weapon.name}`,
+        content: dialogContent,
+        buttons: {},
+        render: (html) => {
+            html.find('.wod-diff-btn').click(function() {
+                html.find('.wod-diff-btn').removeClass('active');
+                $(this).addClass('active');
+                html.find('.wod-dmg-diff-input').val($(this).data('val'));
+            });
+
+            html.find('.wod-cancel-dmg-btn').click(() => html.closest('.dialog').find('.header-button.close').click());
+
+            html.find('.wod-roll-dmg-btn').click(async () => {
+                try {
+                    const defenseSucc = Number(html.find('.wod-defense-succ').val()) || 0;
+                    const finalDiff = Number(html.find('.wod-dmg-diff-input').val());
+                    const dmgManualBonus = Number(html.find('.wod-dmg-manual-bonus').val()) || 0;
+
+                    html.closest('.dialog').find('.header-button.close').click();
+
+                    const netAttackSucc = attackSuccesses - defenseSucc;
+                    if (netAttackSucc <= 0) {
+                        const missData = { speaker: ChatMessage.getSpeaker({ actor }), content: `<p><strong>${escapeHtml(actor.name)}</strong> промахивается! Цель успешно защитилась (Защита: ${defenseSucc} >= Атака: ${attackSuccesses}).</p>` };
+                        if (isBlindAttack) { missData.blind = true; missData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id); }
+                        return ChatMessage.create(missData);
+                    }
+
+                    const bonusDice = Math.max(0, netAttackSucc - 1);
+
+                    // Сначала бонусы, потом штрафы, защита минимума 1
+                    const totalPool = baseDamage + bonusDice + dmgManualBonus;
+                    const finalDmgPool = Math.max(1, Math.floor(totalPool));
+
+                    const dmgRoll = new Roll(`${finalDmgPool}d10`);
+                    await dmgRoll.evaluate();
+                    if (game.dice3d && !isBlindAttack) await game.dice3d.showForRoll(dmgRoll, game.user, true, null, false);
+
+                    let dmgSucc = 0, dmgDiceHTML = "";
+                    for (const die of dmgRoll.dice[0].results) {
+                        const isSucc = die.result >= finalDiff;
+                        if (isSucc) dmgSucc++;
+                        dmgDiceHTML += createDiceHTML(die.result, isSucc ? 'success' : 'neutral');
+                    }
+
+                    dmgSucc = Math.max(1, dmgSucc);
+
+                    const damageHtml = await renderTemplate(`modules/${MODULE_ID}/templates/chat-fire-damage.html`, {
+                        actorName: escapeHtml(actor.name),
+                        weaponName: escapeHtml(weapon.name),
+                        pool: `Базовый (${baseDamage}) + Успехи (${bonusDice}) ${dmgManualBonus ? `${dmgManualBonus > 0 ? '+' : ''}${dmgManualBonus} (Вручную)` : ''} = ${finalDmgPool}`,
+                        difficulty: finalDiff,
+                        diceHTML: dmgDiceHTML,
+                        damageTotal: dmgSucc,
+                        damageType: damageType
+                    });
+
+                    const dmgChatData = { speaker: ChatMessage.getSpeaker({ actor }), content: damageHtml };
+                    if (isBlindAttack) { dmgChatData.blind = true; dmgChatData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id); }
+                    await ChatMessage.create(dmgChatData);
+
+                } catch (e) {
+                    console.error("WoD Panel | Ошибка урона: ", e);
+                    ui.notifications.error("Ошибка урона: " + e.message);
+                }
+            });
+        }
+    }, { width: 400, resizable: false }).render(true);
+}
+
 Hooks.on("ready", () => {
     if (document.getElementById("wod-radial-menu")) return;
 
@@ -883,21 +1230,23 @@ Hooks.on("ready", () => {
     let hasMoved = false;
     let startX, startY, initialX, initialY;
 
-    function createIcon(icon, title, tabName, top, left) {
+    // Ромбовидное меню из 4 кнопок: верх — Здоровье (зелёный), лево — Ресурсы
+    // (синий), право — Дисциплины (фиолетовый), низ — Огонь (красный).
+    function createIcon(icon, title, tabName, top, left, color, borderColor, hoverColor) {
         const btn = document.createElement("div");
         btn.className = "wod-single-icon";
         btn.innerHTML = `<i class="fas ${icon}"></i>`;
         btn.title = title;
         btn.style.cssText = `
             position: absolute; top: ${top}px; left: ${left}px;
-            width: 45px; height: 45px; background: #10b981; color: white;
+            width: 45px; height: 45px; background: ${color}; color: white;
             border-radius: 50%; display: flex; align-items: center; justify-content: center;
             font-size: 20px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.6);
-            border: 2px solid #34d399; transition: all 0.2s ease;
+            border: 2px solid ${borderColor}; transition: all 0.2s ease;
             z-index: 2; pointer-events: auto;
         `;
-        btn.onmouseenter = () => { btn.style.transform = "scale(1.2)"; btn.style.background = "#059669"; };
-        btn.onmouseleave = () => { btn.style.transform = "scale(1)"; btn.style.background = "#10b981"; };
+        btn.onmouseenter = () => { btn.style.transform = "scale(1.2)"; btn.style.background = hoverColor; };
+        btn.onmouseleave = () => { btn.style.transform = "scale(1)"; btn.style.background = color; };
 
         btn.addEventListener("click", (e) => {
             e.stopPropagation();
@@ -908,9 +1257,10 @@ Hooks.on("ready", () => {
         return btn;
     }
 
-    container.appendChild(createIcon("fa-heart", "Здоровье", "tab-health", 0, 37));
-    container.appendChild(createIcon("fa-tint", "Ресурсы", "tab-resources", 65, 0));
-    container.appendChild(createIcon("fa-book", "Дисциплины", "tab-disciplines", 65, 75));
+    container.appendChild(createIcon("fa-heart",      "Здоровье",   "tab-health",      0,  37, "#10b981", "#34d399", "#059669")); // зелёный — верх
+    container.appendChild(createIcon("fa-tint",       "Ресурсы",    "tab-resources",   37, 0,  "#1f5c73", "#5bb9d6", "#2c6b81")); // синий — лево
+    container.appendChild(createIcon("fa-book",       "Дисциплины", "tab-disciplines", 37, 75, "#7c3aed", "#a78bfa", "#6d28d9")); // фиолетовый — право
+    container.appendChild(createIcon("fa-crosshairs", "Огонь",      "tab-firearms",    75, 37, "#8b0000", "#ff4444", "#a80000")); // красный — низ (из wod-firearms-test)
 
     document.body.appendChild(container);
 

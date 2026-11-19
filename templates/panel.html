@@ -4,6 +4,7 @@
         <button type="button" class="wod-tab-btn active" data-tab="tab-health">Здоровье</button>
         <button type="button" class="wod-tab-btn" data-tab="tab-resources">Ресурсы</button>
         <button type="button" class="wod-tab-btn" data-tab="tab-disciplines">Дисциплины</button>
+        <button type="button" class="wod-tab-btn" data-tab="tab-firearms">Огонь</button>
     </div>
 
     <!-- Вкладка: Здоровье -->
@@ -102,5 +103,71 @@
         <div id="disc-final-cost" class="wod-final-cost">
             Стоимость: 0
         </div>
+    </div>
+
+    <!-- Вкладка: Огонь (стрельба) -->
+    <div id="tab-firearms" class="wod-tab-content">
+        <div id="fire-npc-block" style="display: none; margin-bottom: 10px; padding: 5px; background: rgba(0,0,0,0.1); border-radius: 4px; border: 1px solid #444;">
+            <label style="font-weight: bold; color: #000; margin-bottom: 2px; display: block; font-size: 13px;">Выбрать персонажа:</label>
+            <select id="fire-npc-select" style="width: 100%; padding: 4px; border-radius: 4px; border: 1px solid #666; color: #000; font-size: 13px;"></select>
+        </div>
+
+        <div class="form-group" id="fire-actor-block" style="margin-bottom: 10px; display: none;">
+            <label>Персонаж:</label>
+            <select id="fire-actor-select" style="width: 100%;"></select>
+        </div>
+
+        <div class="form-group" style="margin-top: 10px; margin-bottom: 10px;">
+            <label style="font-weight: bold; color: #000; font-size: 13px; margin-bottom: 3px; display: block;">Оружие:</label>
+            <select id="fire-weapon-select" style="width: 100%; padding: 4px; border: 1px solid #666; border-radius: 4px; font-size: 13px;"></select>
+        </div>
+
+        <div class="form-group" style="margin-top: 10px; margin-bottom: 10px;">
+            <label style="font-weight: bold; color: #000; font-size: 13px; margin-bottom: 3px; display: block;">Режим стрельбы:</label>
+            <div id="fire-mode-buttons" style="display: flex; flex-direction: column; gap: 3px;"></div>
+        </div>
+
+        <div id="fire-ammo-info" style="margin-top: 10px; margin-bottom: 10px; font-size: 1em; text-align: center; color: #333; font-weight: bold; background: rgba(0,0,0,0.05); padding: 5px; border-radius: 4px;">
+            В магазине: 0 / 0
+        </div>
+
+        <div style="margin-bottom: 10px;">
+            <label style="font-weight: bold; font-size: 13px;">Тип урона:</label>
+            <div style="display: flex; gap: 4px; margin-top: 4px;">
+                <button type="button" class="fire-dmg-type-btn" data-val="bashing" style="flex:1; padding:4px; font-size:12px; cursor:pointer; border:1px solid #999; border-radius:4px;">Ударный</button>
+                <button type="button" class="fire-dmg-type-btn active" data-val="lethal" style="flex:1; padding:4px; font-size:12px; cursor:pointer; border:1px solid #999; border-radius:4px; background:#2c6b81; color:white;">Летальный</button>
+                <button type="button" class="fire-dmg-type-btn" data-val="aggravated" style="flex:1; padding:4px; font-size:12px; cursor:pointer; border:1px solid #999; border-radius:4px;">Аггравированный</button>
+            </div>
+        </div>
+
+        <div style="margin-bottom: 10px;">
+            <label style="font-weight: bold; font-size: 13px;">Сложность:</label>
+            <div id="fire-difficulty-buttons" style="display: flex; gap: 4px; margin-top: 4px;"></div>
+            <input type="hidden" id="fire-difficulty" value="6">
+        </div>
+
+        <div style="margin-bottom: 10px;">
+            <label style="font-weight: bold; font-size: 13px;">Бонус/Штраф кубов:</label>
+            <input type="number" id="fire-manual-bonus" value="0" style="width: 100%; padding: 4px; border: 1px solid #999; border-radius: 4px;">
+        </div>
+
+        <div style="margin-bottom: 10px; padding: 5px; background: rgba(0,0,0,0.05); border-radius: 4px;">
+            <label style="display: flex; align-items: center; cursor: pointer; margin: 0; font-size: 0.9em;">
+                <input type="checkbox" id="fire-use-will" style="margin-right: 8px;">
+                <span>Тратить Силу Воли (+1 автоуспех, -1 Воля)</span>
+            </label>
+            <label style="display: flex; align-items: center; cursor: pointer; margin: 5px 0 0 0; font-size: 0.9em;">
+                <input type="checkbox" id="fire-ignore-wounds" style="margin-right: 8px;">
+                <span>Игнорировать штрафы от ран</span>
+            </label>
+            <label style="display: flex; align-items: center; cursor: pointer; margin: 5px 0 0 0; font-size: 0.9em; color: #8b0000;">
+                <input type="checkbox" id="fire-blind-roll" style="margin-right: 8px;">
+                <span>Скрытый бросок (виден только Мастеру)</span>
+            </label>
+        </div>
+
+        <button type="button" id="fire-btn" style="margin-top: 15px; padding: 8px 16px; background: #8b0000; color: white; border: 1px solid #5c0000; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.2s;">
+            Огонь!
+        </button>
     </div>
 </div>

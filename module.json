@@ -1,8 +1,8 @@
 {
   "id": "wod-master-panel",
   "title": "WoD Master Panel",
-  "description": "Пульт управления для Мастера и Игроков (Здоровье, Ресурсы, Дисциплины).",
-  "version": "1.3.6",
+  "description": "Пульт управления для Мастера и Игроков (Здоровье, Ресурсы, Дисциплины, Стрельба). Включает функционал wod-firearms-test.",
+  "version": "1.4.0",
   "compatibility": {
     "minimum": "13",
     "verified": "14"
@@ -18,7 +18,13 @@
   "styles": [
     "styles/main.css"
   ],
-  "languages": [],
+  "languages": [
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "lang/en.json"
+    }
+  ],
   "packs": [],
   "url": "https://github.com/RadSeraph/wod-master-panel",
   "manifest": "https://raw.githubusercontent.com/RadSeraph/wod-master-panel/main/module.json",
