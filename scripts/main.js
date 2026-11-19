@@ -850,7 +850,7 @@ async function executeDiscipline(html) {
                 // Надпись про сильную волю: если успех появился лишь благодаря Воли
                 // (кубы сами по себе не дали ничего) — как в тестовом модуле (п.6).
                 resultTextHTML = (netFromDice === 0)
-                    ? `<div style="margin-top: 8px; font-size: 1.2em; font-weight: bold; color: #00008b;">Успех достигнут благодаря сильной Воле</div>`
+                    ? `<div style="margin-top: 4px; font-size: 0.9em; font-style: italic; color: #00008b;">Лишь сильная воля помогает преодолеть трудности!</div>`
                     : `<div style="margin-top: 8px; font-size: 1.2em; font-weight: bold; color: #2e6b4e;">Успехи: ${net} <span style="font-size: 0.8em; color: #00008b;">(включая +1 от Воли)</span></div>`;
             } else {
                 if (succ === 0 && ones > 0) {
