@@ -824,7 +824,11 @@ async function executeDiscipline(html) {
                 // Столовое правило этого модуля: потраченная Воля — это ВСЕГДА
                 // +1 успех, независимо от результата кубов.
                 net += 1;
-                resultTextHTML = `<div style="margin-top: 8px; font-size: 1.2em; font-weight: bold; color: #2e6b4e;">Успехи: ${net} <span style="font-size: 0.8em; color: #00008b;">(включая +1 от Воли)</span></div>`;
+                // Надпись про сильную волю: если успех появился лишь благодаря Воли
+                // (кубы сами по себе не дали ничего) — как в тестовом модуле (п.6).
+                resultTextHTML = (netFromDice === 0)
+                    ? `<div style="margin-top: 8px; font-size: 1.2em; font-weight: bold; color: #00008b;">Успех достигнут благодаря сильной Воле</div>`
+                    : `<div style="margin-top: 8px; font-size: 1.2em; font-weight: bold; color: #2e6b4e;">Успехи: ${net} <span style="font-size: 0.8em; color: #00008b;">(включая +1 от Воли)</span></div>`;
             } else {
                 if (succ === 0 && ones > 0) {
                     resultTextHTML = `<div style="margin-top: 8px; font-size: 1.2em; font-weight: bold; color: #d32f2f;">ПРОВАЛ</div>`;
@@ -1052,10 +1056,11 @@ async function executeFirearmAttack(tab, getActor) {
 
     const roll = new Roll(`${finalPool}d10`);
     await roll.evaluate();
-    // Кубы Dice3D летят ВСЕГДА (исправление: при скрытном броске кубы не пропадали).
-    // Стандартный путь Foundry roll.show(): кубы видят ВСЕ, даже при скрытном броске;
-    // результат в чате при этом остаётся только у GM.
-    await roll.show({ whisper: isBlind ? ChatMessage.getWhisperRecipients("GM").map(u => u.id) : null });
+    // Кубы Dice3D летят ВСЕГДА, в том числе при скрытном броске
+    // (исправление п.5: show() молча возвращает false для blind-сообщений — используем showForRoll напрямую).
+    if (game.dice3d) {
+        await game.dice3d.showForRoll(roll, game.user, true, [game.user.id], false);
+    }
 
     let rawSucc = 0, ones = 0, diceHTML = "";
     for (const die of roll.dice[0].results) {
@@ -1184,10 +1189,11 @@ async function openDamageDialog(actor, weapon, attackSuccesses, damageType, isBl
 
                     const dmgRoll = new Roll(`${finalDmgPool}d10`);
                     await dmgRoll.evaluate();
-                    // Кубы летят ВСЕГДА (исправление: при скрытной атаке кубы не пропадали).
-                    // Стандартный путь Foundry roll.show(): кубы Dice3D видят ВСЕ, даже при
-                    // скрытном броске; результат в чате при этом остаётся только у GM.
-                    await dmgRoll.show({ whisper: isBlindAttack ? ChatMessage.getWhisperRecipients("GM").map(u => u.id) : null });
+                    // Кубы Dice3D летят ВСЕГДА, в том числе при скрытной атаке
+                    // (исправление п.5: show() молча возвращает false для blind-сообщений — используем showForRoll напрямую).
+                    if (game.dice3d) {
+                        await game.dice3d.showForRoll(dmgRoll, game.user, true, [game.user.id], false);
+                    }
 
                     let dmgSucc = 0, dmgOnes = 0, dmgDiceHTML = "";
                     for (const die of dmgRoll.dice[0].results) {
@@ -1205,8 +1211,6 @@ async function openDamageDialog(actor, weapon, attackSuccesses, damageType, isBl
                         weaponName: escapeHtml(weapon.name),
                         pool: `Базовый (${baseDamage}) + Успехи (${bonusDice})${dmgManualBonus ? ` ${dmgManualBonus > 0 ? '+' : ''}(${dmgManualBonus}) ручн.` : ''} = ${finalDmgPool}`,
                         difficulty: finalDiff,
-                        // Текст с расчётами убран — остаётся только строка под кубами (по согласованию).
-                        successesSummary: "",
                         diceHTML: dmgDiceHTML,
                         damageTotal: dmgSucc,
                         damageType: damageType
