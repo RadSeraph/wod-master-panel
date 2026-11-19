@@ -1,6 +1,6 @@
 // ==========================================
 // МОДУЛЬ: WoD Master Panel
-// Файл: scripts/main.js (Версия 2.6 - штрафы от ран по состоянию Health из системы Foundry)
+// Файл: scripts/main.js (Версия 2.7 - накопление урона на шкале здоровья без конвертации типов)
 // ==========================================
 
 const CONFIG = {
@@ -17,9 +17,13 @@ const CONFIG = {
 
 // =========================================
 // ШТРАФЫ ОТ РАН
+// Урон разных типов НЕ конвертируется: каждый тип занимает свои ячейки
+// на шкале здоровья и просто смещает состояние вниз по ней.
+// Пример: 2 bashing + 2 lethal + 2 aggravated = 6 заполненных ячеек.
+// Любой тип урона может заполнить всю шкалу целиком (ограничений по типу нет).
 // Состояние здоровья берется из материнской системы Foundry (WoD20):
 // читаем system.health.penalite — состояние ("Health.Trauma.X"),
-// которое система сама вычисляет по текущему урону актёра.
+// которое система сама вычисляет по суммарному урону актёра.
 // Если поле недоступно, состояние определяется по суммарному урону.
 // Таблица штрафов (согласно правилам):
 //   Помят            0
@@ -59,8 +63,9 @@ function getWoundInfo(actor) {
         stateKey = WOUND_BY_DAMAGE[rawState];
     }
 
-    // 2) Фолбэк: определяем состояние по суммарному урону.
-    //    0 урона — здоров (Помят, штраф 0); 1 урон — Помят; ... 7 урона — При смерти.
+    // 2) Фолбэк: определяем состояние по суммарному количеству заполненных ячеек.
+    //    Урон разных типов не конвертируется, а складывается на шкале:
+    //    0-1 урона — Помят; 2 — Легко ранен; ... 7+ — При смерти.
     if (!stateKey) {
         stateKey = totalDamage <= 1 ? "bruised" : WOUND_BY_DAMAGE[Math.min(totalDamage - 1, 6)];
     }
@@ -501,20 +506,29 @@ async function processHealthAction(html, type, value, useBlood, npcId, players) 
         else if (value === "heal") processValue = -7;
 
         if (processValue > 0) {
+            // НАКОПЛЕНИЕ: каждый тип урона занимает свои ячейки шкалы здоровья,
+            // типы между собой НЕ конвертируются.
+            // Пример: было 2 bashing + 2 lethal, прилетело 2 aggravated -> 6 заполненных ячеек.
             if (type === "bashing") b += processValue;
-            else if (type === "lethal") { const ab = Math.min(processValue, b); b -= ab; l += processValue; }
-            else if (type === "aggravated") { const ab = Math.min(processValue, b); b -= ab; const al = Math.min(processValue - ab, l); l -= al; a += processValue; }
+            else if (type === "lethal") l += processValue;
+            else if (type === "aggravated") a += processValue;
+
+            // Переполнение шкалы: лишнее обрезается по общему лимиту (7 ячеек),
+            // начиная с самого лёгкого типа (bashing -> lethal -> aggravated).
+            let overflow = (b + l + a) - 7;
+            if (overflow > 0) {
+                const trimB = Math.min(b, overflow); b -= trimB; overflow -= trimB;
+                const trimL = Math.min(l, overflow); l -= trimL; overflow -= trimL;
+                const trimA = Math.min(a, overflow); a -= trimA;
+            }
         } else {
-            const h = Math.abs(processValue);
-            if (type === "aggravated") { const ah = Math.min(a, h); bloodCost = ah * 5; a -= ah; }
-            else if (type === "lethal") { const ah = Math.min(l, h); bloodCost = ah * 1; l -= ah; }
-            else if (type === "bashing") { const ah = Math.min(b, h); bloodCost = ah * 1; b -= ah; }
-        }
-        let total = b + l + a;
-        if (total > 7) {
-            if (type === "bashing") b = Math.max(0, 7 - l - a);
-            else if (type === "lethal") l = Math.max(0, 7 - b - a);
-            else if (type === "aggravated") a = Math.max(0, 7 - b - l);
+            // ЛЕЧЕНИЕ: сначала лечится самый лёгкий тип урона — bashing,
+            // затем lethal, и только потом aggravated.
+            let h = Math.abs(processValue);
+            const hb = Math.min(b, h); b -= hb; h -= hb;
+            const hl = Math.min(l, h); l -= hl; h -= hl;
+            const ha = Math.min(a, h); a -= ha;
+            bloodCost = (hl + ha) * 5; // летальный и аггравированный лечатся кровью (5 кр/ячейка)
         }
         let canUpdate = true;
         if (bloodCost > 0 && useBlood) {
