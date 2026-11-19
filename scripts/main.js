@@ -107,6 +107,18 @@ function escapeHtml(str) {
     })[c]);
 }
 
+// Синие информационные уведомления «всё в порядке» с кулдауном 3 секунды
+// на каждое сочетание (тип шкалы + имя актёра), чтобы частые клики не спамили.
+const _statusInfoCooldown = new Map();
+function statusInfo(key, message) {
+    const now = Date.now();
+    const last = _statusInfoCooldown.get(key) || 0;
+    if (now - last < 3000) return false;
+    _statusInfoCooldown.set(key, now);
+    ui.notifications.info(message);
+    return true;
+}
+
 // Единая обёртка ошибок для обработчиков кнопок пульта.
 async function safeRun(label, fn) {
     try {
@@ -586,6 +598,9 @@ async function processHealthAction(html, type, value, useBlood, npcId, players) 
         if (canUpdate && (b !== current.bashing || l !== current.lethal || a !== current.aggravated)) {
             await actor.update({ [`${CONFIG.healthPath}.bashing`]: b, [`${CONFIG.healthPath}.lethal`]: l, [`${CONFIG.healthPath}.aggravated`]: a });
             updatedCount++;
+        } else if (canUpdate && value < 0 && b === 0 && l === 0 && a === 0) {
+            // Лечить нечего — шкала уже полна. Синее уведомление с кулдауном 3с.
+            statusInfo(`health:${actor.name}`, `${actor.name} в полном порядке!`);
         }
     }
     // Сообщение в чат — только если состояние хотя бы одного актёра реально
@@ -655,6 +670,10 @@ async function processResourceAction(html, type, value, npcId, players) {
             updatedCount++;
             let actionText = (value === "damage") ? "опустошена" : ((value === "heal") ? "восстановлена" : "");
             messageParts.push(`<strong>${escapeHtml(actor.name)}</strong> (${config.name} ${actionText} -> Остаток: ${newValue})`);
+        } else if (newValue === max && max > 0) {
+            // Ресурс уже полон — синее уведомление с кулдауном 3с.
+            const msg = (type === "blood") ? "Кровь до краёв!" : "Воля крепка как скала!";
+            statusInfo(`${type}:${actor.name}`, `${actor.name}: ${msg}`);
         }
     }
 
