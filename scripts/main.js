@@ -1,6 +1,6 @@
 // ==========================================
 // МОДУЛЬ: WoD Master Panel
-// Файл: scripts/main.js (Версия 2.5 - игнорирование штрафов от ран)
+// Файл: scripts/main.js (Версия 2.6 - штрафы от ран по состоянию Health из системы Foundry)
 // ==========================================
 
 const CONFIG = {
@@ -11,8 +11,67 @@ const CONFIG = {
     willPath: "system.advantages.willpower.temporary",
     willMax: "system.advantages.willpower.max",
     willPerm: "system.advantages.willpower.permanent",
-    healthPath: "system.health.damage"
+    healthPath: "system.health.damage",
+    healthStatePath: "system.health.penalite"
 };
+
+// =========================================
+// ШТРАФЫ ОТ РАН
+// Состояние здоровья берется из материнской системы Foundry (WoD20):
+// читаем system.health.penalite — состояние ("Health.Trauma.X"),
+// которое система сама вычисляет по текущему урону актёра.
+// Если поле недоступно, состояние определяется по суммарному урону.
+// Таблица штрафов (согласно правилам):
+//   Помят            0
+//   Легко ранен     -1
+//   Ранен           -1
+//   Серьезно ранен  -2
+//   Тяжело ранен    -2
+//   Едва жив        -5
+//   При смерти — бросать кубики нельзя (действие недопустимо)
+// =========================================
+const WOUND_PENALTIES = {
+    "bruised":      { name: "Помят",         penalty: 0 },
+    "battered":     { name: "Легко ранен",   penalty: -1 },
+    "injured":      { name: "Ранен",         penalty: -1 },
+    "wounded":      { name: "Серьезно ранен",penalty: -2 },
+    "disabled":     { name: "Тяжело ранен",  penalty: -2 },
+    "dying":        { name: "Едва жив",      penalty: -5 },
+    "incapacitated":{ name: "При смерти",    penalty: null } // null => действие недопустимо
+};
+
+// Индексы состояний по суммарному количеству урона (фолбэк-таблица)
+const WOUND_BY_DAMAGE = ["bruised", "battered", "injured", "wounded", "disabled", "dying", "incapacitated"];
+
+function getWoundInfo(actor) {
+    const health = foundry.utils.getProperty(actor, CONFIG.healthPath);
+    const totalDamage = health
+        ? (Number(health.bashing) || 0) + (Number(health.lethal) || 0) + (Number(health.aggravated) || 0)
+        : 0;
+
+    // 1) Пробуем взять состояние из материнской системы Foundry.
+    let stateKey = null;
+    const rawState = foundry.utils.getProperty(actor, CONFIG.healthStatePath);
+    if (typeof rawState === "string") {
+        const last = rawState.split(".").pop().toLowerCase(); // "Health.Trauma.Wounded" -> "wounded"
+        if (WOUND_PENALTIES[last]) stateKey = last;
+    } else if (typeof rawState === "number" && WOUND_BY_DAMAGE[rawState]) {
+        stateKey = WOUND_BY_DAMAGE[rawState];
+    }
+
+    // 2) Фолбэк: определяем состояние по суммарному урону.
+    //    0 урона — здоров (Помят, штраф 0); 1 урон — Помят; ... 7 урона — При смерти.
+    if (!stateKey) {
+        stateKey = totalDamage <= 1 ? "bruised" : WOUND_BY_DAMAGE[Math.min(totalDamage - 1, 6)];
+    }
+
+    const state = WOUND_PENALTIES[stateKey];
+    return {
+        dying: state.penalty === null,
+        penalty: state.penalty === null ? null : (Number(state.penalty) || 0),
+        stateName: state.name
+    };
+}
 
 function getPlayerActors() {
     const folder = game.folders.find(f => f.name === CONFIG.folderName && f.type === "Actor");
@@ -313,22 +372,16 @@ function setupPanelLogic(html, isGM) {
             let attrValue = attrKey === "willpower" ? (Number(foundry.utils.getProperty(actor, CONFIG.willPerm)) || 0) : (Number(foundry.utils.getProperty(actor, `system.attributes.${attrKey}.total`)) || 0);
             let skillValue = skillKey ? (Number(foundry.utils.getProperty(actor, `system.abilities.${skillKey}.value`)) || 0) : 0;
 
-            // --- ШТРАФ ОТ РАН (с учётом игнорирования) ---
+            // --- ШТРАФ ОТ РАН (состояние берется из системы Foundry) ---
+            const wound = getWoundInfo(actor);
             let woundPenalty = 0;
-            if (!ignoreWounds) {
-                const health = foundry.utils.getProperty(actor, CONFIG.healthPath);
-                if (health) {
-                    const totalDamage = (Number(health.bashing) || 0) + (Number(health.lethal) || 0) + (Number(health.aggravated) || 0);
-                    if (totalDamage >= 6) woundPenalty = -5;
-                    else if (totalDamage >= 4) woundPenalty = -2;
-                    else if (totalDamage >= 2) woundPenalty = -1;
-                }
-            }
+            if (!ignoreWounds && !wound.dying) woundPenalty = wound.penalty;
 
             attrInfoHTML = `
                 <div style="margin-top: 5px; font-size: 0.9em; color: #333; background: rgba(0,0,0,0.05); padding: 5px; border-radius: 4px;">
                     <strong>Пул:</strong> ${attrKey} (${attrValue}) + ${skillKey || "0"} (${skillValue})
-                    ${woundPenalty !== 0 ? `<span style="color: red;">Штраф от ран: ${woundPenalty}</span>` : ""}
+                    ${wound.dying ? `<span style="color: red;"><strong>При смерти: броски невозможны!</strong></span>` : ""}
+                    ${!wound.dying && woundPenalty !== 0 ? `<span style="color: red;">Штраф от ран (${wound.stateName}): ${woundPenalty}</span>` : ""}
                     ${ignoreWounds ? `<span style="color: #888; font-style: italic;"> (штрафы от ран игнорируются)</span>` : ""}
                 </div>
                 <div style="margin-top: 5px; display: flex; align-items: center; gap: 5px;">
@@ -630,17 +683,13 @@ async function executeDiscipline(html) {
         let attrValue = attrKey === "willpower" ? (Number(foundry.utils.getProperty(actor, CONFIG.willPerm)) || 0) : (Number(foundry.utils.getProperty(actor, `system.attributes.${attrKey}.total`)) || 0);
         let skillValue = skillKey ? (Number(foundry.utils.getProperty(actor, `system.abilities.${skillKey}.value`)) || 0) : 0;
 
-        // --- ШТРАФ ОТ РАН (с учётом игнорирования) ---
-        let woundPenalty = 0;
-        if (!ignoreWounds) {
-            const health = foundry.utils.getProperty(actor, CONFIG.healthPath);
-            if (health) {
-                const totalDamage = (Number(health.bashing) || 0) + (Number(health.lethal) || 0) + (Number(health.aggravated) || 0);
-                if (totalDamage >= 6) woundPenalty = -5;
-                else if (totalDamage >= 4) woundPenalty = -2;
-                else if (totalDamage >= 2) woundPenalty = -1;
-            }
+        // --- ШТРАФ ОТ РАН (состояние берется из системы Foundry) ---
+        const wound = getWoundInfo(actor);
+        if (!ignoreWounds && wound.dying) {
+            ui.notifications.error(`${actor.name}: без сознания — бросать кубики нельзя!`);
+            return;
         }
+        const woundPenalty = (!ignoreWounds && !wound.dying) ? wound.penalty : 0;
 
         const pool = Math.max(0, attrValue + skillValue + manualBonus + woundPenalty);
 
