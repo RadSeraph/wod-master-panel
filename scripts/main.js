@@ -1,6 +1,6 @@
 // ==========================================
 // МОДУЛЬ: WoD Master Panel
-// Файл: scripts/main.js (Версия 2.7 - накопление урона на шкале здоровья без конвертации типов)
+// Файл: scripts/main.js (Версия 2.8 - накопление урона на шкале здоровья; кнопки каждого типа лечат только свой тип)
 // ==========================================
 
 const CONFIG = {
@@ -522,12 +522,16 @@ async function processHealthAction(html, type, value, useBlood, npcId, players) 
                 const trimA = Math.min(a, overflow); a -= trimA;
             }
         } else {
-            // ЛЕЧЕНИЕ: сначала лечится самый лёгкий тип урона — bashing,
-            // затем lethal, и только потом aggravated.
+            // ЛЕЧЕНИЕ: каждая кнопка лечит ТОЛЬКО свой тип урона.
+            // Кнопки bashing лечат только bashing, lethal — только lethal,
+            // aggravated — только aggravated. Никакого "перетекания" лечения
+            // на другие типы (раньше из-за сквозного лечения кнопки башинга
+            // могли вылечить агграву).
             let h = Math.abs(processValue);
-            const hb = Math.min(b, h); b -= hb; h -= hb;
-            const hl = Math.min(l, h); l -= hl; h -= hl;
-            const ha = Math.min(a, h); a -= ha;
+            let hb = 0, hl = 0, ha = 0;
+            if (type === "bashing")      { hb = Math.min(b, h); b -= hb; }
+            else if (type === "lethal")  { hl = Math.min(l, h); l -= hl; }
+            else if (type === "aggravated") { ha = Math.min(a, h); a -= ha; }
             bloodCost = (hl + ha) * 5; // летальный и аггравированный лечатся кровью (5 кр/ячейка)
         }
         let canUpdate = true;

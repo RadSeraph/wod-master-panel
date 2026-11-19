@@ -2,7 +2,7 @@
   "id": "wod-master-panel",
   "title": "WoD Master Panel",
   "description": "Пульт управления для Мастера и Игроков (Здоровье, Ресурсы, Дисциплины).",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "compatibility": {
     "minimum": "13",
     "verified": "14"
