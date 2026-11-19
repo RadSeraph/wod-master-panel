@@ -100,6 +100,23 @@ function getNPCActors() {
     return game.actors.filter(a => !playerIds.includes(a.id)).sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// Экранирование пользовательских строк (имена актёров/сил) перед вставкой в HTML.
+function escapeHtml(str) {
+    return String(str ?? "").replace(/[&<>"']/g, c => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    })[c]);
+}
+
+// Единая обёртка ошибок для обработчиков кнопок пульта.
+async function safeRun(label, fn) {
+    try {
+        await fn();
+    } catch (e) {
+        console.error(`WoD Panel | Ошибка (${label}): `, e);
+        ui.notifications.error(`Ошибка: ${label}. Подробности в консоли.`);
+    }
+}
+
 function getParentName(actor, parentId) {
     if (!parentId) return "Прочие силы";
     let parentItem = actor.items.get(parentId) || actor.items.find(i => i.name.toLowerCase() === parentId.toLowerCase());
@@ -122,11 +139,11 @@ function getGroupedPowerOptions(actor) {
     const sortedParents = Object.keys(grouped).sort();
     let html = "";
     sortedParents.forEach(parent => {
-        html += `<optgroup label="${parent}">`;
+        html += `<optgroup label="${escapeHtml(parent)}">`;
         grouped[parent].sort((a, b) => Number(a.system.level) - Number(b.system.level));
         grouped[parent].forEach(p => {
             const hasRoll = p.system.dice1 !== "" && p.system.dice1 !== null;
-            html += `<option value="${p.id}">${p.name} (Ур. ${p.system.level})${hasRoll ? "" : " (Без броска)"}</option>`;
+            html += `<option value="${p.id}">${escapeHtml(p.name)} (Ур. ${p.system.level})${hasRoll ? "" : " (Без броска)"}</option>`;
         });
         html += `</optgroup>`;
     });
@@ -182,13 +199,8 @@ async function openMainPanel(initialTab = "tab-health") {
                 function() { $(this).css("background", "#a80000"); },
                 function() { $(this).css("background", "#8b0000"); }
             );
-            myButton.click(async () => {
-                try {
-                    await executeDiscipline(html);
-                } catch (e) {
-                    console.error("WoD Panel | Ошибка при броске: ", e);
-                    ui.notifications.error("Ошибка при использовании дисциплины. Смотрите консоль.");
-                }
+            myButton.click(() => {
+                safeRun("использование дисциплины", () => executeDiscipline(html));
             });
             html.find('#tab-disciplines').append(myButton);
 
@@ -217,11 +229,11 @@ function setupPanelLogic(html, isGM) {
 
     let healthActorsHTML = "";
     if (isGM) healthActorsHTML += `<button type="button" class="wod-actor-btn" data-id="ALL">★ ВСЕ ПЕРСОНАЖИ ★</button>`;
-    players.forEach(p => healthActorsHTML += `<button type="button" class="wod-actor-btn" data-id="${p.id}">${p.name}</button>`);
+    players.forEach(p => healthActorsHTML += `<button type="button" class="wod-actor-btn" data-id="${p.id}">${escapeHtml(p.name)}</button>`);
     html.find('#health-actor-list').html(healthActorsHTML);
     if (isGM) {
         let npcOptions = `<option value="">Не выбрано</option>`;
-        npcs.forEach(n => npcOptions += `<option value="${n.id}">${n.name}</option>`);
+        npcs.forEach(n => npcOptions += `<option value="${n.id}">${escapeHtml(n.name)}</option>`);
         html.find('#health-npc-select').html(npcOptions);
         html.find('#health-npc-block').show();
     } else {
@@ -231,11 +243,11 @@ function setupPanelLogic(html, isGM) {
 
     let resActorsHTML = "";
     if (isGM) resActorsHTML += `<button type="button" class="wod-actor-btn" data-id="ALL">★ ВСЕ ПЕРСОНАЖИ ★</button>`;
-    players.forEach(p => resActorsHTML += `<button type="button" class="wod-actor-btn" data-id="${p.id}">${p.name}</button>`);
+    players.forEach(p => resActorsHTML += `<button type="button" class="wod-actor-btn" data-id="${p.id}">${escapeHtml(p.name)}</button>`);
     html.find('#res-actor-list').html(resActorsHTML);
     if (isGM) {
         let npcOptions = `<option value="">Не выбрано</option>`;
-        npcs.forEach(n => npcOptions += `<option value="${n.id}">${n.name}</option>`);
+        npcs.forEach(n => npcOptions += `<option value="${n.id}">${escapeHtml(n.name)}</option>`);
         html.find('#res-npc-select').html(npcOptions);
         html.find('#res-npc-block').show();
     } else {
@@ -246,14 +258,14 @@ function setupPanelLogic(html, isGM) {
     if (isGM) {
         let discOptions = `<option value="">Не выбрано</option>`;
         const actorsWithPowers = game.actors.contents.filter(a => a.items.some(i => i.type === "Power" && i.system.level > 0)).sort((a,b) => a.name.localeCompare(b.name));
-        actorsWithPowers.forEach(n => discOptions += `<option value="${n.id}">${n.name}</option>`);
+        actorsWithPowers.forEach(n => discOptions += `<option value="${n.id}">${escapeHtml(n.name)}</option>`);
         html.find('#disc-npc-select').html(discOptions);
         html.find('#disc-npc-block').show();
         html.find('#disc-actor-block').hide();
     } else {
         const actor = game.user.character;
         if (actor) {
-            html.find('#disc-actor-select').html(`<option value="${actor.id}">${actor.name}</option>`);
+            html.find('#disc-actor-select').html(`<option value="${actor.id}">${escapeHtml(actor.name)}</option>`);
             html.find('#disc-actor-block').hide();
         }
     }
@@ -318,13 +330,13 @@ function setupPanelLogic(html, isGM) {
         const type = $(this).data('type'); const val = parseInt($(this).data('val'));
         const useBlood = html.find('#health-use-blood').is(':checked');
         const npcId = isGM ? html.find('#health-npc-select').val() : "";
-        processHealthAction(html, type, val, useBlood, npcId, players);
+        safeRun("обработка здоровья", () => processHealthAction(html, type, val, useBlood, npcId, players));
     });
 
     html.find('#tab-resources .wod-grid-btn').click(function() {
         const type = $(this).data('type'); const val = parseInt($(this).data('val'));
         const npcId = isGM ? html.find('#res-npc-select').val() : "";
-        processResourceAction(html, type, val, npcId, players);
+        safeRun("обработка ресурсов", () => processResourceAction(html, type, val, npcId, players));
     });
 
     html.find('.wod-arrow-btn').click(function() {
@@ -335,9 +347,9 @@ function setupPanelLogic(html, isGM) {
 
         if (isHealthTab) {
             const useBlood = html.find('#health-use-blood').is(':checked');
-            processHealthAction(html, type, action, useBlood, npcId, players);
+            safeRun("обработка здоровья", () => processHealthAction(html, type, action, useBlood, npcId, players));
         } else {
-            processResourceAction(html, type, action, npcId, players);
+            safeRun("обработка ресурсов", () => processResourceAction(html, type, action, npcId, players));
         }
     });
 
@@ -576,12 +588,18 @@ async function processHealthAction(html, type, value, useBlood, npcId, players) 
             updatedCount++;
         }
     }
-    if (updatedCount > 0 || targets.length > 0) {
-        let targetName = targets.map(t => t.name).join(', ');
+    // Сообщение в чат — только если состояние хотя бы одного актёра реально
+    // изменилось (урон/лечение применены или списана Кровь). Раньше условие
+    // `updatedCount > 0 || targets.length > 0` всегда давало true при выбранной
+    // цели, и в чат падали ложные сообщения (например, «лечит урон», когда
+    // лечение заблокировано нехваткой Крови).
+    if (updatedCount > 0 || totalBloodCost > 0) {
+        let validTargets = targets.filter(Boolean);
+        let targetName = validTargets.map(t => t.name).join(', ');
         let bloodText = totalBloodCost > 0 ? ` (потрачено ${totalBloodCost} Крови)` : "";
         let actionText = (value > 0 || value === "damage") ? "получает" : "лечит";
 
-        let chatData = { speaker: ChatMessage.getSpeaker(), content: `<p><strong>${targetName}</strong> ${actionText} урон (${namesMap[type]})${bloodText}.</p>` };
+        let chatData = { speaker: ChatMessage.getSpeaker(), content: `<p><strong>${escapeHtml(targetName)}</strong> ${actionText} урон (${namesMap[type]})${bloodText}.</p>` };
 
         let whisperTargets = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
         if (!game.user.isGM) whisperTargets.push(game.user.id);
@@ -631,13 +649,13 @@ async function processResourceAction(html, type, value, npcId, players) {
         if (newValue < 0) newValue = 0;
         if (newValue > max) newValue = max;
 
+        // В чат идёт только реально изменившееся значение (без noop-строк).
         if (newValue !== current) {
             await actor.update({ [config.path]: newValue });
             updatedCount++;
+            let actionText = (value === "damage") ? "опустошена" : ((value === "heal") ? "восстановлена" : "");
+            messageParts.push(`<strong>${escapeHtml(actor.name)}</strong> (${config.name} ${actionText} -> Остаток: ${newValue})`);
         }
-
-        let actionText = (value === "damage") ? "опустошена" : ((value === "heal") ? "восстановлена" : "");
-        messageParts.push(`<strong>${actor.name}</strong> (${config.name} ${actionText} -> Остаток: ${newValue})`);
     }
 
     if (updatedCount > 0) {
@@ -798,7 +816,7 @@ async function executeDiscipline(html) {
         speaker: ChatMessage.getSpeaker({ actor: actor }),
         content: `
             <div style="font-family: 'Signika', sans-serif;">
-                <h3 style="margin-top: 0; margin-bottom: 5px; border-bottom: 2px solid #8b0000; padding-bottom: 3px;">${power.name}</h3>
+                <h3 style="margin-top: 0; margin-bottom: 5px; border-bottom: 2px solid #8b0000; padding-bottom: 3px;">${escapeHtml(power.name)}</h3>
                 ${resourceHTML}
                 <div style="margin-top: 10px; font-size: 0.9em; border-top: 1px solid #ccc; padding-top: 5px;">
                     ${power.system.description || ""}
@@ -824,17 +842,23 @@ Hooks.on("ready", () => {
     const container = document.createElement("div");
     container.id = "wod-radial-menu";
 
+    const MENU_W = 120, MENU_H = 120;
+    // Ограничение позиции меню пределами окна (актуально при смене монитора/размера).
+    const clampPos = (left, top) => ({
+        left: Math.max(0, Math.min(left, window.innerWidth - MENU_W)),
+        top: Math.max(0, Math.min(top, window.innerHeight - MENU_H))
+    });
+
     const savedPos = localStorage.getItem("wod-radial-menu-pos");
+    let initLeft = 50, initTop = Math.round(window.innerHeight * 0.45);
     if (savedPos) {
         try {
             const pos = JSON.parse(savedPos);
-            container.style.cssText = `position: fixed; top: ${pos.top}px; left: ${pos.left}px; width: 120px; height: 120px; z-index: 10; pointer-events: none;`;
-        } catch (e) {
-            container.style.cssText = "position: fixed; top: 45%; left: 50px; width: 120px; height: 120px; z-index: 10; pointer-events: none;";
-        }
-    } else {
-        container.style.cssText = "position: fixed; top: 45%; left: 50px; width: 120px; height: 120px; z-index: 10; pointer-events: none;";
+            const c = clampPos(Number(pos.left) || 0, Number(pos.top) || 0);
+            initLeft = c.left; initTop = c.top;
+        } catch (e) { /* используем позицию по умолчанию */ }
     }
+    container.style.cssText = `position: fixed; top: ${initTop}px; left: ${initLeft}px; width: ${MENU_W}px; height: ${MENU_H}px; z-index: 10; pointer-events: none;`;
 
     let isDragging = false;
     let hasMoved = false;
@@ -889,8 +913,9 @@ Hooks.on("ready", () => {
         if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
             hasMoved = true;
             e.preventDefault();
-            container.style.left = `${initialX + dx}px`;
-            container.style.top = `${initialY + dy}px`;
+            const c = clampPos(initialX + dx, initialY + dy);
+            container.style.left = `${c.left}px`;
+            container.style.top = `${c.top}px`;
             container.style.bottom = "auto";
             container.style.right = "auto";
         }
