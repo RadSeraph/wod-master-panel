@@ -794,10 +794,9 @@ async function executeDiscipline(html) {
             roll = new Roll(`${pool}d10`);
             await roll.evaluate();
 
-            // Кубы Dice3D летят всегда; при скрытном броске — только автору и GM.
-            const discWhisperIds = isBlind
-                ? [...new Set([game.user.id, ...ChatMessage.getWhisperRecipients("GM").map(u => u.id)])]
-                : null;
+            // Кубы Dice3D летят ВСЕГДА (исправление: при скрытном броске кубы не пропадали).
+            // При скрытном броске кубы видит только кидающий — и больше никто.
+            const discWhisperIds = isBlind ? [game.user.id] : null;
             if (game.dice3d) {
                 await game.dice3d.showForRoll(roll, game.user, true, discWhisperIds, isBlind);
             }
@@ -822,15 +821,10 @@ async function executeDiscipline(html) {
             let resultTextHTML = "";
 
             if (useWillpower) {
-                // Правило WoD: +1 успех за Волю даётся только при наличии хотя
-                // бы одного успеха на кубах. Иначе бросок провален, Воля сгорает.
-                if (netFromDice > 0) {
-                    net += 1;
-                    resultTextHTML = `<div style="margin-top: 8px; font-size: 1.2em; font-weight: bold; color: #2e6b4e;">Успехи: ${net} <span style="font-size: 0.8em; color: #00008b;">(включая +1 от Воли)</span></div>`;
-                } else {
-                    resultTextHTML = `<div style="margin-top: 8px; font-size: 1.2em; font-weight: bold; color: #d32f2f;">НЕУДАЧА</div>
-                                      <div style="margin-top: 4px; font-size: 0.9em; font-style: italic; color: #2c6b81;">Ни одного успеха на кубах — Воля не помогает! Бросок провален.</div>`;
-                }
+                // Столовое правило этого модуля: потраченная Воля — это ВСЕГДА
+                // +1 успех, независимо от результата кубов.
+                net += 1;
+                resultTextHTML = `<div style="margin-top: 8px; font-size: 1.2em; font-weight: bold; color: #2e6b4e;">Успехи: ${net} <span style="font-size: 0.8em; color: #00008b;">(включая +1 от Воли)</span></div>`;
             } else {
                 if (succ === 0 && ones > 0) {
                     resultTextHTML = `<div style="margin-top: 8px; font-size: 1.2em; font-weight: bold; color: #d32f2f;">ПРОВАЛ</div>`;
@@ -870,8 +864,8 @@ async function executeDiscipline(html) {
 
     if (isBlind) {
         chatData.blind = true;
-        // Шёпот: GM + автор, чтобы бросивший сам видел результат в чате.
-        chatData.whisper = [...new Set([game.user.id, ...ChatMessage.getWhisperRecipients("GM").map(u => u.id)])];
+        // Скрытный бросок: результат видит ТОЛЬКО GM (автор — нет, в этом смысл скрытности).
+        chatData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
         if (roll) chatData.rolls = [roll];
     }
 
@@ -1047,7 +1041,7 @@ async function executeFirearmAttack(tab, getActor) {
 
     if (finalPool <= 0) {
         const failData = { speaker: ChatMessage.getSpeaker({ actor }), content: `<p><strong>${escapeHtml(actor.name)}</strong> пытается выстрелить из ${escapeHtml(weapon.name)}, но пул кубов равен 0${ignoreWounds ? '' : ` (Штраф от ран: ${woundPenalty})`}. Действие провалено.</p>` };
-        if (isBlind) { failData.blind = true; failData.whisper = [...new Set([game.user.id, ...ChatMessage.getWhisperRecipients("GM").map(u => u.id)])]; }
+        if (isBlind) { failData.blind = true; failData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id); }
         return ChatMessage.create(failData);
     }
 
@@ -1056,11 +1050,9 @@ async function executeFirearmAttack(tab, getActor) {
 
     const roll = new Roll(`${finalPool}d10`);
     await roll.evaluate();
-    // Кубы Dice3D летят ВСЕГДА (в т.ч. при скрытом броске). Для скрытных
-    // бросков кубы видят только автор и GM: whisper = [автор, ...GM].
-    const whisperIds = isBlind
-        ? [...new Set([game.user.id, ...ChatMessage.getWhisperRecipients("GM").map(u => u.id)])]
-        : null;
+    // Кубы Dice3D летят ВСЕГДА (исправление: при скрытном броске кубы не пропадали).
+    // При скрытном броске кубы видит только кидающий — и больше никто.
+    const whisperIds = isBlind ? [game.user.id] : null;
     if (game.dice3d) await game.dice3d.showForRoll(roll, game.user, true, whisperIds, isBlind);
 
     let rawSucc = 0, ones = 0, diceHTML = "";
@@ -1077,21 +1069,16 @@ async function executeFirearmAttack(tab, getActor) {
     let willText = "";
 
     if (useWill) {
-        // Правило WoD: успех за Волю добавляется ТОЛЬКО если на кубах есть
-        // хотя бы один успех (иначе — «Лишь сильная воля…» без прибавки).
-        if (rawSucc > 0) {
-            netSucc += 1;
-            willText = `<div style="color: #00008b; font-weight: bold; margin-top: 5px;">+1 успех за потраченную Волю</div>`;
-        } else {
-            willText = `<div style="color: #2c6b81; font-weight: bold; margin-top: 5px; font-style: italic;">Ни одного успеха на кубах — Воля не помогает! Бросок провален.</div>`;
-        }
+        // Столовое правило этого модуля: Воля — это ВСЕГДА +1 успех,
+        // независимо от результата кубов.
+        netSucc += 1;
+        willText = `<div style="color: #00008b; font-weight: bold; margin-top: 5px;">+1 успех за потраченную Волю</div>`;
         const curWP = Number(foundry.utils.getProperty(actor, CONFIG.willPath)) || 0;
         await actor.update({ [CONFIG.willPath]: Math.max(0, curWP - 1) });
     }
 
     let resultText = "";
     if (rawSucc === 0 && ones > 0 && !useWill) resultText = `<div style="color: #d32f2f; font-weight: bold; margin-top: 5px;">ПРОВАЛ (Ботч)</div>`;
-    else if (rawSucc === 0 && useWill) resultText = `<div style="color: #d32f2f; font-weight: bold; margin-top: 5px;">ПРОМАХ</div>`;
     else if (netSucc === 0) resultText = `<div style="color: #7f8c8d; font-weight: bold; margin-top: 5px;">ПРОМАХ</div>`;
     else resultText = `<div style="color: #2e6b4e; font-weight: bold; margin-top: 5px;">Успехи: ${netSucc}</div>`;
 
@@ -1101,12 +1088,13 @@ async function executeFirearmAttack(tab, getActor) {
         pool: `${attrKey} (${attrVal}) + ${abilityKey} (${abilityVal})${accuracy ? ` + Acc (${accuracy})` : ''}${config.bonus ? ` + Режим (${config.bonus})` : ''}${woundPenalty ? ` Штраф ран: ${woundStateName} (${woundPenalty})` : ''}${manualBonus ? ` + Вручную (${manualBonus})` : ''} = ${finalPool}`,
         difficulty: finalDiff,
         // Сумма успехов в формате «всего (кубики + бонусы)» — как состав пула выше.
-        successesSummary: netSucc > 0 ? `<div style="color: #2e6b4e; font-weight: bold; margin-top: 5px;">Успехи: ${netSucc} (${rawSucc - ones}${useWill && rawSucc > 0 ? ' + Воля (1)' : ''}${(ones > 0 && rawSucc > 0) ? ' − Единицы (' + ones + ')' : ''} = ${netSucc})</div>` : "",
+        successesSummary: netSucc > 0 ? `<div style="color: #2e6b4e; font-weight: bold; margin-top: 5px;">Успехи: ${netSucc} (${rawSucc - ones}${useWill ? ' + Воля (1)' : ''}${ones > 0 ? ' − Единицы (' + ones + ')' : ''} = ${netSucc})</div>` : "",
         diceHTML: diceHTML + resultText + willText
     });
 
     const chatData = { speaker: ChatMessage.getSpeaker({ actor }), content: attackHtml };
-    if (isBlind) { chatData.blind = true; chatData.whisper = [...new Set([game.user.id, ...ChatMessage.getWhisperRecipients("GM").map(u => u.id)])]; }
+    // Скрытный бросок: сообщение видит ТОЛЬКО GM (автор — нет, в этом смысл скрытности).
+    if (isBlind) { chatData.blind = true; chatData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id); }
     await ChatMessage.create(chatData);
 
     if (netSucc > 0) {
@@ -1178,7 +1166,7 @@ async function openDamageDialog(actor, weapon, attackSuccesses, damageType, isBl
                     const netAttackSucc = attackSuccesses - defenseSucc;
                     if (netAttackSucc <= 0) {
                         const missData = { speaker: ChatMessage.getSpeaker({ actor }), content: `<p><strong>${escapeHtml(actor.name)}</strong> промахивается! Цель успешно защитилась (Защита: ${defenseSucc} >= Атака: ${attackSuccesses}).</p>` };
-                        if (isBlindAttack) { missData.blind = true; missData.whisper = [...new Set([game.user.id, ...ChatMessage.getWhisperRecipients("GM").map(u => u.id)])]; }
+                        if (isBlindAttack) { missData.blind = true; missData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id); }
                         return ChatMessage.create(missData);
                     }
 
@@ -1190,10 +1178,9 @@ async function openDamageDialog(actor, weapon, attackSuccesses, damageType, isBl
 
                     const dmgRoll = new Roll(`${finalDmgPool}d10`);
                     await dmgRoll.evaluate();
-                    // Кубы летят всегда; при скрытной атаке — только автору и GM.
-                    const dmgWhisperIds = isBlindAttack
-                        ? [...new Set([game.user.id, ...ChatMessage.getWhisperRecipients("GM").map(u => u.id)])]
-                        : null;
+                    // Кубы летят ВСЕГДА (исправление: при скрытной атаке кубы не пропадали).
+                    // При скрытном броске кубы видит только кидающий — и больше никто.
+                    const dmgWhisperIds = isBlindAttack ? [game.user.id] : null;
                     if (game.dice3d) await game.dice3d.showForRoll(dmgRoll, game.user, true, dmgWhisperIds, isBlindAttack);
 
                     let dmgSucc = 0, dmgOnes = 0, dmgDiceHTML = "";
@@ -1205,24 +1192,23 @@ async function openDamageDialog(actor, weapon, attackSuccesses, damageType, isBl
                         dmgDiceHTML += createDiceHTML(die.result, isSucc ? 'success' : (isOne ? 'fail' : 'neutral'));
                     }
 
-                    // Правило WoD: каждая единица на кубах отменяет один успех урона.
-                    const netDamage = Math.max(0, dmgSucc - dmgOnes);
-                    dmgSucc = netDamage > 0 ? netDamage : 0;
+                    // Урон = количество успехов на кубах (без вычитания единиц,
+                    // как было до v1.4.2 — откат по требованию стола).
+                    dmgSucc = Math.max(0, dmgSucc);
 
                     const damageHtml = await renderTemplate(`modules/${MODULE_ID}/templates/chat-fire-damage.html`, {
                         actorName: escapeHtml(actor.name),
                         weaponName: escapeHtml(weapon.name),
                         pool: `Базовый (${baseDamage}) + Успехи (${bonusDice})${dmgManualBonus ? ` ${dmgManualBonus > 0 ? '+' : ''}(${dmgManualBonus}) ручн.` : ''} = ${finalDmgPool}`,
                         difficulty: finalDiff,
-                        // Сумма в формате «всего (успехи − единицы)» — как состав пула выше.
-                        successesSummary: netDamage > 0 ? `<div style="color: #8b0000; font-weight: bold; margin-top: 5px;">Урон: ${netDamage} (${dmgSucc}${dmgOnes > 0 ? ' − Единицы (' + dmgOnes + ')' : ''} = ${netDamage}) ${damageType}</div>` : "",
-                        diceHTML: dmgDiceHTML + (netDamage <= 0 ? `<div style="color: #7f8c8d; font-weight: bold; margin-top: 5px;">УРОН НЕ ПРОШЕЛ</div>` : ''),
+                        successesSummary: dmgSucc > 0 ? `<div style="color: #8b0000; font-weight: bold; margin-top: 5px;">Урон: ${dmgSucc} (${dmgSucc}${dmgOnes > 0 ? ' − Единицы (' + dmgOnes + ')' : ''}) ${damageType}</div>` : "",
+                        diceHTML: dmgDiceHTML + (dmgSucc <= 0 ? `<div style="color: #7f8c8d; font-weight: bold; margin-top: 5px;">УРОН НЕ ПРОШЕЛ</div>` : ''),
                         damageTotal: dmgSucc,
                         damageType: damageType
                     });
 
                     const dmgChatData = { speaker: ChatMessage.getSpeaker({ actor }), content: damageHtml };
-                    if (isBlindAttack) { dmgChatData.blind = true; dmgChatData.whisper = [...new Set([game.user.id, ...ChatMessage.getWhisperRecipients("GM").map(u => u.id)])]; }
+                    if (isBlindAttack) { dmgChatData.blind = true; dmgChatData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id); }
                     await ChatMessage.create(dmgChatData);
 
                 } catch (e) {
