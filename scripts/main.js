@@ -1107,7 +1107,7 @@ async function executeFirearmAttack(tab, getActor) {
         // Возвращена надпись из тестового модуля: если успех появился лишь
         // благодаря Воли (кубы сами по себе не дали ничего), пишем «сильная воля».
         willText = (diceNet === 0)
-            ? `<div style="color: #00008b; font-weight: bold; margin-top: 5px;">Успех достигнут благодаря сильной Воле</div>`
+            ? `<div style="margin-top: 4px; font-size: 0.9em; font-style: italic; color: #00008b;">Лишь сильная воля помогает преодолеть трудности!</div>`
             : `<div style="color: #00008b; font-weight: bold; margin-top: 5px;">+1 успех за потраченную Волю</div>`;
         const curWP = Number(foundry.utils.getProperty(actor, CONFIG.willPath)) || 0;
         await actor.update({ [CONFIG.willPath]: Math.max(0, curWP - 1) });
