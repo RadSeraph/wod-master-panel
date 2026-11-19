@@ -761,15 +761,15 @@ async function executeDiscipline(html) {
         if (isNaN(curB)) return ui.notifications.error(`${actor.name}: нет пула Крови!`);
         if (curB < finalBlood) return ui.notifications.error(`${actor.name}: мало Крови!`);
         await actor.update({ [CONFIG.bloodPath]: curB - finalBlood });
-        // Формат как в карточках стрельбы: списание (-N) и остаток.
-        resourceHTML += `<p style="color: #8b0000; margin: 2px 0;"><em>${escapeHtml(actor.name)}: Кровь −${finalBlood} → Остаток: ${curB - finalBlood}</em></p>`;
+        // По согласованию (v1.4.4): остаток ресурса в чате не указываем — только объём списания.
+        resourceHTML += `<p style="color: #8b0000; margin: 2px 0;"><em>${escapeHtml(actor.name)}: Кровь −${finalBlood}</em></p>`;
     }
     if (finalWill > 0) {
         const curW = Number(foundry.utils.getProperty(actor, CONFIG.willPath));
         if (isNaN(curW)) return ui.notifications.error(`${actor.name}: нет пула Воли!`);
         if (curW < finalWill) return ui.notifications.error(`${actor.name}: мало Воли!`);
         await actor.update({ [CONFIG.willPath]: curW - finalWill });
-        resourceHTML += `<p style="color: #00008b; margin: 2px 0;"><em>${escapeHtml(actor.name)}: Воля −${finalWill} → Остаток: ${curW - finalWill}</em></p>`;
+        resourceHTML += `<p style="color: #00008b; margin: 2px 0;"><em>${escapeHtml(actor.name)}: Воля −${finalWill}</em></p>`;
     }
 
     let rollHTML = "";
@@ -1021,7 +1021,9 @@ async function executeFirearmAttack(tab, getActor) {
     const attrVal = attrObj.total ?? attrObj.value ?? 0;
     const abilityVal = actor.system.abilities?.[abilityKey]?.value || 0;
     const accuracy = weapon.system.attack?.accuracy || 0;
-    const specialty = actor.system.abilities?.[abilityKey]?.speciality || "";
+    // Специализация в стрельбу пока НЕ добавляется (по согласованию, v1.4.4).
+    // Убрано чтение speciality у оружия: из-за него десятки становились золотыми,
+    // хотя специализации на стрельбе нет.
 
     // --- ШТРАФ ОТ РАН: единая логика материнской панели (v1.3.6+) ---
     const wound = getWoundInfo(actor);
@@ -1051,18 +1053,17 @@ async function executeFirearmAttack(tab, getActor) {
     const roll = new Roll(`${finalPool}d10`);
     await roll.evaluate();
     // Кубы Dice3D летят ВСЕГДА (исправление: при скрытном броске кубы не пропадали).
-    // При скрытном броске кубы видит только кидающий — и больше никто.
-    const whisperIds = isBlind ? [game.user.id] : null;
-    if (game.dice3d) await game.dice3d.showForRoll(roll, game.user, true, whisperIds, isBlind);
+    // Стандартный путь Foundry roll.show(): кубы видят ВСЕ, даже при скрытном броске;
+    // результат в чате при этом остаётся только у GM.
+    await roll.show({ whisper: isBlind ? ChatMessage.getWhisperRecipients("GM").map(u => u.id) : null });
 
     let rawSucc = 0, ones = 0, diceHTML = "";
     for (const die of roll.dice[0].results) {
         const isSucc = die.result >= finalDiff;
         const isOne = die.result === 1;
-        const isSpec = (die.result === 10 && specialty);
-        if (isSucc) rawSucc += isSpec ? 2 : 1;
+        if (isSucc) rawSucc += 1;
         if (isOne) ones++;
-        diceHTML += createDiceHTML(die.result, isSucc ? (isSpec ? 'spec' : 'success') : (isOne ? 'fail' : 'neutral'));
+        diceHTML += createDiceHTML(die.result, isSucc ? 'success' : (isOne ? 'fail' : 'neutral'));
     }
 
     let netSucc = Math.max(0, rawSucc - ones);
@@ -1071,8 +1072,13 @@ async function executeFirearmAttack(tab, getActor) {
     if (useWill) {
         // Столовое правило этого модуля: Воля — это ВСЕГДА +1 успех,
         // независимо от результата кубов.
+        const diceNet = netSucc; // итог кубов до Воли
         netSucc += 1;
-        willText = `<div style="color: #00008b; font-weight: bold; margin-top: 5px;">+1 успех за потраченную Волю</div>`;
+        // Возвращена надпись из тестового модуля: если успех появился лишь
+        // благодаря Воли (кубы сами по себе не дали ничего), пишем «сильная воля».
+        willText = (diceNet === 0)
+            ? `<div style="color: #00008b; font-weight: bold; margin-top: 5px;">Успех достигнут благодаря сильной Воле</div>`
+            : `<div style="color: #00008b; font-weight: bold; margin-top: 5px;">+1 успех за потраченную Волю</div>`;
         const curWP = Number(foundry.utils.getProperty(actor, CONFIG.willPath)) || 0;
         await actor.update({ [CONFIG.willPath]: Math.max(0, curWP - 1) });
     }
@@ -1087,8 +1093,8 @@ async function executeFirearmAttack(tab, getActor) {
         weaponName: escapeHtml(weapon.name),
         pool: `${attrKey} (${attrVal}) + ${abilityKey} (${abilityVal})${accuracy ? ` + Acc (${accuracy})` : ''}${config.bonus ? ` + Режим (${config.bonus})` : ''}${woundPenalty ? ` Штраф ран: ${woundStateName} (${woundPenalty})` : ''}${manualBonus ? ` + Вручную (${manualBonus})` : ''} = ${finalPool}`,
         difficulty: finalDiff,
-        // Сумма успехов в формате «всего (кубики + бонусы)» — как состав пула выше.
-        successesSummary: netSucc > 0 ? `<div style="color: #2e6b4e; font-weight: bold; margin-top: 5px;">Успехи: ${netSucc} (${rawSucc - ones}${useWill ? ' + Воля (1)' : ''}${ones > 0 ? ' − Единицы (' + ones + ')' : ''} = ${netSucc})</div>` : "",
+        // Текст с расчётами убран — остаётся только строка под кубами (по согласованию).
+        successesSummary: "",
         diceHTML: diceHTML + resultText + willText
     });
 
@@ -1179,30 +1185,29 @@ async function openDamageDialog(actor, weapon, attackSuccesses, damageType, isBl
                     const dmgRoll = new Roll(`${finalDmgPool}d10`);
                     await dmgRoll.evaluate();
                     // Кубы летят ВСЕГДА (исправление: при скрытной атаке кубы не пропадали).
-                    // При скрытном броске кубы видит только кидающий — и больше никто.
-                    const dmgWhisperIds = isBlindAttack ? [game.user.id] : null;
-                    if (game.dice3d) await game.dice3d.showForRoll(dmgRoll, game.user, true, dmgWhisperIds, isBlindAttack);
+                    // Стандартный путь Foundry roll.show(): кубы Dice3D видят ВСЕ, даже при
+                    // скрытном броске; результат в чате при этом остаётся только у GM.
+                    await dmgRoll.show({ whisper: isBlindAttack ? ChatMessage.getWhisperRecipients("GM").map(u => u.id) : null });
 
                     let dmgSucc = 0, dmgOnes = 0, dmgDiceHTML = "";
                     for (const die of dmgRoll.dice[0].results) {
                         const isSucc = die.result >= finalDiff;
                         const isOne = die.result === 1;
-                        if (isSucc) dmgSucc++;
-                        if (isOne) dmgOnes++;
+                        // Единицы вычитают успех урона (правило стола, v1.4.4):
+                        // минимум один куб и минимум один успех — сохраняются.
+                        if (isSucc && !isOne) dmgSucc++;
+                        else if (isOne) dmgOnes++;
                         dmgDiceHTML += createDiceHTML(die.result, isSucc ? 'success' : (isOne ? 'fail' : 'neutral'));
                     }
-
-                    // Урон = количество успехов на кубах (без вычитания единиц,
-                    // как было до v1.4.2 — откат по требованию стола).
-                    dmgSucc = Math.max(0, dmgSucc);
 
                     const damageHtml = await renderTemplate(`modules/${MODULE_ID}/templates/chat-fire-damage.html`, {
                         actorName: escapeHtml(actor.name),
                         weaponName: escapeHtml(weapon.name),
                         pool: `Базовый (${baseDamage}) + Успехи (${bonusDice})${dmgManualBonus ? ` ${dmgManualBonus > 0 ? '+' : ''}(${dmgManualBonus}) ручн.` : ''} = ${finalDmgPool}`,
                         difficulty: finalDiff,
-                        successesSummary: dmgSucc > 0 ? `<div style="color: #8b0000; font-weight: bold; margin-top: 5px;">Урон: ${dmgSucc} (${dmgSucc}${dmgOnes > 0 ? ' − Единицы (' + dmgOnes + ')' : ''}) ${damageType}</div>` : "",
-                        diceHTML: dmgDiceHTML + (dmgSucc <= 0 ? `<div style="color: #7f8c8d; font-weight: bold; margin-top: 5px;">УРОН НЕ ПРОШЕЛ</div>` : ''),
+                        // Текст с расчётами убран — остаётся только строка под кубами (по согласованию).
+                        successesSummary: "",
+                        diceHTML: dmgDiceHTML,
                         damageTotal: dmgSucc,
                         damageType: damageType
                     });

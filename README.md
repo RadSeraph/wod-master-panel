@@ -29,3 +29,12 @@
 I would like to express my deepest gratitude to [**JohanFalt**.](https://github.com/JohanFalt/Foundry_WoD20) 
 
 He was the creator of the core system for Foundry VTT, which served as the inspiration for my project. He was the one who opened the door for me to online Vampire: The Masquerade gaming. Without his work and enthusiasm, my module would likely never have seen the light of day.
+
+## v1.4.4
+- Убрана золотая «специализация» в стрельбе (десятки больше не золотые).
+- Убран текст расчётов над кубами в карточках атаки/урона — остались только строки под кубами.
+- В карточке урона добавлена итоговая строка: «Урон: N (тип)»; для лечения — «Лечение: N (тип)».
+- Дисциплины: убран «Остаток» из строк списания ресурсов в чате.
+- Скрытные броски атаки/урона: кубы Dice3D снова летят (через roll.show()).
+- Возвращена надпись «Успех достигнут благодаря сильной Воле» (когда успех дала только Воля).
+- Единицы в броске урона вычитают успех; минимум один куб и минимум один успех сохранены.
