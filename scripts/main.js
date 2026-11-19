@@ -533,6 +533,15 @@ async function processHealthAction(html, type, value, useBlood, npcId, players) 
     }
     const namesMap = { bashing: "Дробящий", lethal: "Летальный", aggravated: "Аггравированный" };
     let updatedCount = 0, totalBloodCost = 0;
+    // Запоминаем суммарный урон каждой цели ДО изменения — чтобы написать в
+    // чате реальное количество нанесённого/вылеченного урона (п.1).
+    const prevDamage = {};
+    for (const actor of targets) {
+        if (!actor) continue;
+        const cur = foundry.utils.getProperty(actor, CONFIG.healthPath);
+        if (!cur) continue;
+        prevDamage[actor.id] = (Number(cur.bashing) || 0) + (Number(cur.lethal) || 0) + (Number(cur.aggravated) || 0);
+    }
 
     for (const actor of targets) {
         if (!actor) continue;
@@ -627,7 +636,19 @@ async function processHealthAction(html, type, value, useBlood, npcId, players) 
         let bloodText = totalBloodCost > 0 ? ` (потрачено ${totalBloodCost} Крови)` : "";
         let actionText = (value > 0 || value === "damage") ? "получает" : "лечит";
 
-        let chatData = { speaker: ChatMessage.getSpeaker(), content: `<p><strong>${escapeHtml(targetName)}</strong> ${actionText} урон (${namesMap[type]})${bloodText}.</p>` };
+        // Количество реально изменённого урона (сумма дельт по всем целям):
+        // при нанесении — сколько ячеек реально заполнено, при лечении —
+        // сколько реально снято.
+        let changedAmount = 0;
+        for (const actor of targets) {
+            if (!actor) continue;
+            const cur = foundry.utils.getProperty(actor, CONFIG.healthPath);
+            if (!cur) continue;
+            const sum = (Number(cur.bashing) || 0) + (Number(cur.lethal) || 0) + (Number(cur.aggravated) || 0);
+            changedAmount += Math.abs(sum - (Number(prevDamage[actor.id]) || 0));
+        }
+
+        let chatData = { speaker: ChatMessage.getSpeaker(), content: `<p><strong>${escapeHtml(targetName)}</strong> ${actionText} урон ${changedAmount} (${namesMap[type]})${bloodText}.</p>` };
 
         let whisperTargets = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
         if (!game.user.isGM) whisperTargets.push(game.user.id);
@@ -795,8 +816,10 @@ async function executeDiscipline(html) {
             await roll.evaluate();
 
             // Кубы Dice3D летят ВСЕГДА (исправление: при скрытном броске кубы не пропадали).
-            // При скрытном броске кубы видит только кидающий — и больше никто.
-            const discWhisperIds = isBlind ? [game.user.id] : null;
+            // П.4: при скрытном броске кубы НЕ должны быть видны кидающему —
+            // showForRoll с whisper = null и hide = true скрывает анимацию у всех,
+            // включая автора броска.
+            const discWhisperIds = isBlind ? null : undefined;
             if (game.dice3d) {
                 await game.dice3d.showForRoll(roll, game.user, true, discWhisperIds, isBlind);
             }
@@ -1057,9 +1080,11 @@ async function executeFirearmAttack(tab, getActor) {
     const roll = new Roll(`${finalPool}d10`);
     await roll.evaluate();
     // Кубы Dice3D летят ВСЕГДА, в том числе при скрытном броске
-    // (исправление п.5: show() молча возвращает false для blind-сообщений — используем showForRoll напрямую).
+    // (show() молча возвращает false для blind-сообщений — используем showForRoll напрямую).
+    // П.4: при скрытном броске кубы НЕ видны никому, включая кидающего
+    // (whisper = null, hide = true).
     if (game.dice3d) {
-        await game.dice3d.showForRoll(roll, game.user, true, [game.user.id], false);
+        await game.dice3d.showForRoll(roll, game.user, true, isBlind ? null : undefined, isBlind);
     }
 
     let rawSucc = 0, ones = 0, diceHTML = "";
@@ -1190,21 +1215,25 @@ async function openDamageDialog(actor, weapon, attackSuccesses, damageType, isBl
                     const dmgRoll = new Roll(`${finalDmgPool}d10`);
                     await dmgRoll.evaluate();
                     // Кубы Dice3D летят ВСЕГДА, в том числе при скрытной атаке
-                    // (исправление п.5: show() молча возвращает false для blind-сообщений — используем showForRoll напрямую).
+                    // (show() молча возвращает false для blind-сообщений — используем showForRoll напрямую).
+                    // П.4: при скрытной атаке кубы НЕ видны никому, включая кидающего
+                    // (whisper = null, hide = true).
                     if (game.dice3d) {
-                        await game.dice3d.showForRoll(dmgRoll, game.user, true, [game.user.id], false);
+                        await game.dice3d.showForRoll(dmgRoll, game.user, true, isBlindAttack ? null : undefined, isBlindAttack);
                     }
 
                     let dmgSucc = 0, dmgOnes = 0, dmgDiceHTML = "";
                     for (const die of dmgRoll.dice[0].results) {
                         const isSucc = die.result >= finalDiff;
                         const isOne = die.result === 1;
-                        // Единицы вычитают успех урона (правило стола, v1.4.4):
-                        // минимум один куб и минимум один успех — сохраняются.
-                        if (isSucc && !isOne) dmgSucc++;
-                        else if (isOne) dmgOnes++;
+                        if (isSucc) dmgSucc++;
+                        if (isOne) dmgOnes++;
                         dmgDiceHTML += createDiceHTML(die.result, isSucc ? 'success' : (isOne ? 'fail' : 'neutral'));
                     }
+
+                    // Единицы вычитают успехи урона (п.3): как и в броске атаки
+                    // дисциплин (netFromDice = succ - ones). Итог не уходит в минус.
+                    dmgSucc = Math.max(0, dmgSucc - dmgOnes);
 
                     const damageHtml = await renderTemplate(`modules/${MODULE_ID}/templates/chat-fire-damage.html`, {
                         actorName: escapeHtml(actor.name),
