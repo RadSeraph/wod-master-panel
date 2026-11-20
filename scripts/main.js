@@ -203,6 +203,27 @@ function makeChatAudience({ actor = null, isBlind = false, forcePrivate = false 
 // Синие информационные уведомления «всё в порядке» с кулдауном 3 секунды
 // на каждое сочетание (тип шкалы + имя актёра), чтобы частые клики не спамили.
 const _statusInfoCooldown = new Map();
+
+// ==========================================
+// АНИМАЦИЯ КУБОВ (v2.0.9, вариант А по согласованию)
+//   Единая точка показа 3D-кубов: дисциплины, выстрел, урон.
+//   Если установлен и активен Dice So Nice! — анимацию берёт на себя он
+//   (в т.ч. через встроенный ролл сообщения), наша ручная анимация пропускается,
+//   чтобы кубы не летели дважды. Если DSN нет/выключен — показываем кубы сами.
+// ==========================================
+async function showDice3dOnce(roll, actor, isBlind) {
+    if (!roll || !game.dice3d) return; // модуля кубиков (Dice So Nice / Dice3D API) нет — ничего не делаем
+    const dsnActive = !!game.modules.get("dice-so-nice")?.active;
+    if (dsnActive) return; // DNS сам анимирует бросок — ручной показ пропускаем (иначе кубы летят дважды)
+    try {
+        const flavorUser = ChatMessage.getSpeaker({ actor }).user || game.user;
+        const whisperIds = isBlind ? buildResourceAudience(actor, true).whisper : undefined;
+        await game.dice3d.showForRoll(roll, flavorUser, true, whisperIds, isBlind && !game.user.isGM);
+    } catch (e) {
+        console.warn("WoD Panel | не удалось показать кубы:", e);
+    }
+}
+
 function statusInfo(key, message) {
     const now = Date.now();
     const last = _statusInfoCooldown.get(key) || 0;
@@ -967,19 +988,9 @@ async function executeDiscipline(html) {
             // Исправление v2.0.7 (комментарий 6): при скрытном броске кубы теперь
             // летят и у кидающего тоже — в шёпот кубам добавляется автор броска
             // (раньше whisper = только ГМ, hide = true, и игрок-автор кубов не видел).
-            const discWhisperIds = isBlind ? buildResourceAudience(actor, true).whisper : undefined;
-            if (game.dice3d) {
-                // Исправление v2.0.8 (комментарий 6): раньше при скрытном броске
-                // непися кубы не летели. Foundry/Dice3D молча подавляет показ
-                // кубов для blind-бросков, когда кидает сам ГМ (flavor-blind),
-                // а "кидающим" в showForRoll передавался game.user — тогда как
-                // реальным автором сообщения является ГМ-персонаж актёра.
-                // Теперь: rollMode "blind" только если кидает НЕ ГМ (игрок тянет
-                // скрытый бросок); для ГМ — обычный показ с шёпотом-аудиторией,
-                // чтобы кубы улетали и были видны мастеру и владельцу актёра.
-                const discFlavorUser = ChatMessage.getSpeaker({ actor }).user || game.user;
-                await game.dice3d.showForRoll(roll, discFlavorUser, true, discWhisperIds, isBlind && !game.user.isGM);
-            }
+            // Единая точка показа кубов (v2.0.9): без Dice So Nice! — ручная
+            // анимация, с DSN — пропуск (иначе кубы летят дважды).
+            await showDice3dOnce(roll, actor, isBlind);
 
             let succ = 0, ones = 0;
             let diceHTML = "";
@@ -1054,7 +1065,13 @@ async function executeDiscipline(html) {
     //     видели карточку силы (строка «Потрачено N ...» внутри неё);
     //     при снятой галке «Скрытный» шёпот больше НЕ подставляется.
     Object.assign(chatData, makeChatAudience({ actor, isBlind, forcePrivate: isBlind }));
-    if (isBlind && roll) chatData.rolls = [roll];
+    // Исправление v2.0.9 (комментарий про двойные кубы): раньше сюда подмешивалось
+    // chatData.rolls = [roll] — Foundry встраивает ролл в сообщение, а Dice So Nice!
+    // автоматически анимирует любой ролл внутри сообщения чата. Плюс наш собственный
+    // вызов game.dice3d.showForRoll выше — итого кубы летели ДВАЖДЫ. Теперь rolls НЕ
+    // передаём: единственная анимация — явный showForRoll (см. helper ниже).
+    // ВНИМАНИЕ: при скрытном броске непися мастер может увидеть всплывающую
+    // формулу "Nd10" в карточке сообщения — это ожидаемое поведение (кубы-то летят).
 
     ChatMessage.create(chatData);
 }
@@ -1242,15 +1259,9 @@ async function executeFirearmAttack(tab, getActor) {
     // Кубы Dice3D летят ВСЕГДА, в том числе при скрытном броске
     // (show() молча возвращает false для blind-сообщений — используем showForRoll напрямую).
     // При скрытном броске кубы скрыты ото всех, кроме мастера (GM).
-    if (game.dice3d) {
-        // Исправление v2.0.7 (комментарий 6): кубы скрытного выстрела видны и автору.
-        const fireWhisperIds = isBlind ? buildResourceAudience(actor, true).whisper : undefined;
-        // Исправление v2.0.8 (комментарий 6): см. аналогичное место в дисциплинах —
-        // flavor-user берётся из спикера актёра, blind-режим кубов включается
-        // только когда скрытый бросок делает игрок (не ГМ).
-        const fireFlavorUser = ChatMessage.getSpeaker({ actor }).user || game.user;
-        await game.dice3d.showForRoll(roll, fireFlavorUser, true, fireWhisperIds, isBlind && !game.user.isGM);
-    }
+    // Единая точка показа кубов (v2.0.9): без Dice So Nice! — ручная анимация,
+    // с DSN — пропуск (иначе кубы летят дважды).
+    await showDice3dOnce(roll, actor, isBlind);
 
     let rawSucc = 0, ones = 0, diceHTML = "";
     for (const die of roll.dice[0].results) {
@@ -1403,13 +1414,9 @@ async function openDamageDialog(actor, weapon, attackSuccesses, damageType, isBl
                     // Кубы Dice3D летят ВСЕГДА, в том числе при скрытной атаке
                     // (show() молча возвращает false для blind-сообщений — используем showForRoll напрямую).
                     // При скрытной атаке кубы скрыты ото всех, кроме мастера (GM).
-                    if (game.dice3d) {
-                        // Исправление v2.0.7 (комментарий 6): кубы скрытого урона видны и автору.
-                        const dmgWhisperIds = isBlindAttack ? buildResourceAudience(actor, true).whisper : undefined;
-                        // Исправление v2.0.8 (комментарий 6): то же для кубов урона.
-                        const dmgFlavorUser = ChatMessage.getSpeaker({ actor }).user || game.user;
-                        await game.dice3d.showForRoll(dmgRoll, dmgFlavorUser, true, dmgWhisperIds, isBlindAttack && !game.user.isGM);
-                    }
+                    // Единая точка показа кубов (v2.0.9): без Dice So Nice! — ручная
+                    // анимация, с DSN — пропуск (иначе кубы летят дважды).
+                    await showDice3dOnce(dmgRoll, actor, isBlindAttack);
 
                     let dmgSucc = 0, dmgOnes = 0, dmgDiceHTML = "";
                     for (const die of dmgRoll.dice[0].results) {
