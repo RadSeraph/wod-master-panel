@@ -2,7 +2,7 @@
   "id": "wod-master-panel",
   "title": "WoD Master Panel",
   "description": "Пульт управления для Мастера и Игроков (Здоровье, Ресурсы, Дисциплины, Стрельба). Включает функционал wod-firearms-test.",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "compatibility": {
     "minimum": "13",
     "verified": "14"

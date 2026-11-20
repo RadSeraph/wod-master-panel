@@ -777,6 +777,14 @@ async function executeDiscipline(html) {
     }
 
     let resourceHTML = "";
+    // Пункт 4 (согласовано, v2.0.2): трата ресурсов (Кровь/Воля) видна только
+    // владельцу актёра и мастеру — остальные игроки не видят ни трату, ни остаток.
+    let resourceWhisper = null;
+    if (finalBlood > 0 || finalWill > 0) {
+        resourceWhisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
+        const ownerIds = Array.isArray(actor.getOwnerUserIDs) ? actor.getOwnerUserIDs() : [];
+        for (const uid of ownerIds) if (!resourceWhisper.includes(uid)) resourceWhisper.push(uid);
+    }
     if (finalBlood > 0) {
         const curB = Number(foundry.utils.getProperty(actor, CONFIG.bloodPath));
         if (isNaN(curB)) return ui.notifications.error(`${actor.name}: нет пула Крови!`);
@@ -895,6 +903,11 @@ async function executeDiscipline(html) {
         // Скрытный бросок: результат видит ТОЛЬКО GM (автор — нет, в этом смысл скрытности).
         chatData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
         if (roll) chatData.rolls = [roll];
+    } else if (resourceWhisper && resourceHTML) {
+        // Пункт 4 (согласовано): строки «Потрачено N ... (осталось M)» не должны
+        // показывать чужие остатки другим игрокам — всё сообщение шепчем
+        // владельцу актёра и мастерам. Формат текста при этом не меняется.
+        chatData.whisper = resourceWhisper;
     }
 
     ChatMessage.create(chatData);
@@ -1099,19 +1112,24 @@ async function executeFirearmAttack(tab, getActor) {
 
     let netSucc = Math.max(0, rawSucc - ones);
     let willText = "";
+    // Пункт 4 (согласовано): списание Воли за выстрел — только владелец актёра и мастера.
+    let fireWillWhisper = null;
 
     if (useWill) {
         // Столовое правило этого модуля: Воля — это ВСЕГДА +1 успех,
         // независимо от результата кубов.
         const diceNet = netSucc; // итог кубов до Воли
         netSucc += 1;
-        // Возвращена надпись из тестового модуля: если успех появился лишь
-        // благодаря Воли (кубы сами по себе не дали ничего), пишем «сильная воля».
+        // Родительский вариант отображения (согласовано, п.D): строка про сильную
+        // волю показывается при пустых кубах; пометки «(+1 успех)» нет.
         willText = (diceNet === 0)
             ? `<div style="margin-top: 4px; font-size: 0.9em; font-style: italic; color: #00008b;">Лишь сильная воля помогает преодолеть трудности!</div>`
-            : `<div style="color: #00008b; font-weight: bold; margin-top: 5px;">+1 успех за потраченную Волю</div>`;
+            : "";
         const curWP = Number(foundry.utils.getProperty(actor, CONFIG.willPath)) || 0;
         await actor.update({ [CONFIG.willPath]: Math.max(0, curWP - 1) });
+        fireWillWhisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
+        const ownerIds = Array.isArray(actor.getOwnerUserIDs) ? actor.getOwnerUserIDs() : [];
+        for (const uid of ownerIds) if (!fireWillWhisper.includes(uid)) fireWillWhisper.push(uid);
     }
 
     let resultText = "";
@@ -1132,7 +1150,18 @@ async function executeFirearmAttack(tab, getActor) {
     const chatData = { speaker: ChatMessage.getSpeaker({ actor }), content: attackHtml };
     // Скрытный бросок: сообщение видит ТОЛЬКО GM (автор — нет, в этом смысл скрытности).
     if (isBlind) { chatData.blind = true; chatData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id); }
+    else if (fireWillWhisper) {
+        // Пункт 4 (согласовано): карточка со списанием Воли видна только владельцу актёра и мастерам.
+        chatData.whisper = fireWillWhisper;
+    }
     await ChatMessage.create(chatData);
+
+    // Пункт 8 (согласовано): при нулевых успехах атаки — отдельная строка в чате.
+    if (netSucc <= 0) {
+        const missShotData = { speaker: ChatMessage.getSpeaker({ actor }), content: `<p><strong>${escapeHtml(actor.name)}</strong> промахивается.</p>` };
+        if (isBlind) { missShotData.blind = true; missShotData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id); }
+        await ChatMessage.create(missShotData);
+    }
 
     if (netSucc > 0) {
         setTimeout(() => openDamageDialog(actor, weapon, netSucc, damageType, isBlind), 600);
