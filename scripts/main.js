@@ -1,6 +1,9 @@
 // ==========================================
 // МОДУЛЬ: WoD Master Panel
-// Файл: scripts/main.js (Версия 3.1 - единая суммирующаяся шкала на 7 ячеек:
+// Файл: scripts/main.js (Версия 3.2 - аудитория чата: скрытные броски видят
+// мастер И автор броска; потери/приобретения от мастера видят владелец актёра и
+// кидающий; промах в стрельбе — одним сообщением вместо двух.
+// Версия 3.1 - единая суммирующаяся шкала на 7 ячеек:
 // все типы урона занимают общие ячейки; новый тип заполняет только свободные
 // ячейки и не может вытеснить уже нанесённый урон; при переполнении избыток
 // повышается по тяжести: дробящий -> летальный, летальный -> аггравированный,
@@ -139,6 +142,39 @@ async function safeRun(label, fn) {
         console.error(`WoD Panel | Ошибка (${label}): `, e);
         ui.notifications.error(`Ошибка: ${label}. Подробности в консоли.`);
     }
+}
+
+// =========================================
+// АУДИТОРИЯ СООБЩЕНИЙ ЧАТА
+// Ключевое правило Foundry: если у ChatMessage задано поле whisper, сообщение
+// видят ТОЛЬКО перечисленные в нём пользователи — автор в их числе автоматически
+// НЕ оказывается. Поэтому во все whisper-списки автор добавляется явно
+// (см. addAuthorToWhisper). Без этого скрытый бросок мастера «пропадал»:
+// getWhisperRecipients("GM") возвращает только OTHERх ГМов и пуст для
+// единственного мастера, а значит не содержит даже его самого.
+// =========================================
+
+// Явно добавляет текущего пользователя в список шёпота (без дублей).
+function addAuthorToWhisper(ids) {
+    const list = Array.isArray(ids) ? ids.slice() : [];
+    if (!list.includes(game.user.id)) list.push(game.user.id);
+    return list;
+}
+
+// Аудитория обычного (не скрытого) сообщения о списаниях/изменениях ресурсов:
+// владелец актёра + все мастера + сам кидающий. Игрок видит свои потери и
+// приобретения от мастера, чужих остатков не видит.
+function resourceAudience(actor) {
+    const ids = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
+    const ownerIds = actor && Array.isArray(actor.getOwnerUserIDs) ? actor.getOwnerUserIDs() : [];
+    for (const uid of ownerIds) if (!ids.includes(uid)) ids.push(uid);
+    return addAuthorToWhisper(ids);
+}
+
+// Аудитория скрытного броска: все мастера + сам кидающий (автор видит свой
+// скрытный результат; остальные игроки — нет).
+function blindAudience() {
+    return addAuthorToWhisper(ChatMessage.getWhisperRecipients("GM").map(u => u.id));
 }
 
 function getParentName(actor, parentId) {
@@ -650,9 +686,11 @@ async function processHealthAction(html, type, value, useBlood, npcId, players) 
 
         let chatData = { speaker: ChatMessage.getSpeaker(), content: `<p><strong>${escapeHtml(targetName)}</strong> ${actionText} урон ${changedAmount} (${namesMap[type]})${bloodText}.</p>` };
 
-        let whisperTargets = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
-        if (!game.user.isGM) whisperTargets.push(game.user.id);
-        chatData.whisper = whisperTargets;
+        // Пункт 3: персонаж видит потери/приобретения, нанесённые мастером.
+        // Аудитория: владельцы всех затронутых актёров + мастера + сам кликающий.
+        const healthAudience = new Set(addAuthorToWhisper(ChatMessage.getWhisperRecipients("GM").map(u => u.id)));
+        for (const t of validTargets) for (const uid of resourceAudience(t)) healthAudience.add(uid);
+        chatData.whisper = Array.from(healthAudience);
 
         ChatMessage.create(chatData);
     }
@@ -719,9 +757,11 @@ async function processResourceAction(html, type, value, npcId, players) {
             content: `<p>${messageParts.join('<br>')}</p>`
         };
 
-        let whisperTargets = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
-        if (!game.user.isGM) whisperTargets.push(game.user.id);
-        chatData.whisper = whisperTargets;
+        // Пункт 3: персонаж видит свои потери/приобретения от мастера.
+        // Аудитория: владельцы всех затронутых актёров + мастера + сам кликающий.
+        const resAudience = new Set(addAuthorToWhisper(ChatMessage.getWhisperRecipients("GM").map(u => u.id)));
+        for (const t of targets) if (t) for (const uid of resourceAudience(t)) resAudience.add(uid);
+        chatData.whisper = Array.from(resAudience);
 
         ChatMessage.create(chatData);
     }
@@ -777,13 +817,12 @@ async function executeDiscipline(html) {
     }
 
     let resourceHTML = "";
-    // Пункт 4 (согласовано, v2.0.2): трата ресурсов (Кровь/Воля) видна только
-    // владельцу актёра и мастеру — остальные игроки не видят ни трату, ни остаток.
+    // Пункт 4 (согласовано, v2.0.2) + пункт 3 (v2.0.3): трата ресурсов (Кровь/Воля)
+    // видна владельцу актёра, мастерам и самому кидающему — остальные игроки не
+    // видят ни трату, ни остаток.
     let resourceWhisper = null;
     if (finalBlood > 0 || finalWill > 0) {
-        resourceWhisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
-        const ownerIds = Array.isArray(actor.getOwnerUserIDs) ? actor.getOwnerUserIDs() : [];
-        for (const uid of ownerIds) if (!resourceWhisper.includes(uid)) resourceWhisper.push(uid);
+        resourceWhisper = resourceAudience(actor);
     }
     if (finalBlood > 0) {
         const curB = Number(foundry.utils.getProperty(actor, CONFIG.bloodPath));
@@ -825,9 +864,9 @@ async function executeDiscipline(html) {
             await roll.evaluate();
 
             // Кубы Dice3D летят ВСЕГДА (исправление: при скрытном броске кубы не пропадали).
-            // При скрытном броске кубы скрыты ото всех, кроме мастера (GM):
-            // whisper = список ГМ, hide = true (кидающий-игрок кубов не видит).
-            const discWhisperIds = isBlind ? ChatMessage.getWhisperRecipients("GM").map(u => u.id) : undefined;
+            // При скрытном броске кубы видят только мастера и сам кидающий
+            // (whisper = blindAudience(), hide = true для остальных).
+            const discWhisperIds = isBlind ? blindAudience() : undefined;
             if (game.dice3d) {
                 await game.dice3d.showForRoll(roll, game.user, true, discWhisperIds, isBlind);
             }
@@ -900,8 +939,10 @@ async function executeDiscipline(html) {
 
     if (isBlind) {
         chatData.blind = true;
-        // Скрытный бросок: результат видит ТОЛЬКО GM (автор — нет, в этом смысл скрытности).
-        chatData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
+        // Пункт 1/4: скрытный бросок видит мастер, и автор броска — тоже
+        // (иначе при единственном мастере whisper-список пуст и сообщение
+        // не видит никто; а игроку его собственный скрытый результат нужен).
+        chatData.whisper = blindAudience();
         if (roll) chatData.rolls = [roll];
     } else if (resourceWhisper && resourceHTML) {
         // Пункт 4 (согласовано): строки «Потрачено N ... (осталось M)» не должны
@@ -1084,7 +1125,7 @@ async function executeFirearmAttack(tab, getActor) {
 
     if (finalPool <= 0) {
         const failData = { speaker: ChatMessage.getSpeaker({ actor }), content: `<p><strong>${escapeHtml(actor.name)}</strong> пытается выстрелить из ${escapeHtml(weapon.name)}, но пул кубов равен 0${ignoreWounds ? '' : ` (Штраф от ран: ${woundPenalty})`}. Действие провалено.</p>` };
-        if (isBlind) { failData.blind = true; failData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id); }
+        if (isBlind) { failData.blind = true; failData.whisper = blindAudience(); }
         return ChatMessage.create(failData);
     }
 
@@ -1095,9 +1136,9 @@ async function executeFirearmAttack(tab, getActor) {
     await roll.evaluate();
     // Кубы Dice3D летят ВСЕГДА, в том числе при скрытном броске
     // (show() молча возвращает false для blind-сообщений — используем showForRoll напрямую).
-    // При скрытном броске кубы скрыты ото всех, кроме мастера (GM).
+    // При скрытном броске кубы видят только мастера и сам кидающий.
     if (game.dice3d) {
-        const fireWhisperIds = isBlind ? ChatMessage.getWhisperRecipients("GM").map(u => u.id) : undefined;
+        const fireWhisperIds = isBlind ? blindAudience() : undefined;
         await game.dice3d.showForRoll(roll, game.user, true, fireWhisperIds, isBlind);
     }
 
@@ -1127,9 +1168,7 @@ async function executeFirearmAttack(tab, getActor) {
             : "";
         const curWP = Number(foundry.utils.getProperty(actor, CONFIG.willPath)) || 0;
         await actor.update({ [CONFIG.willPath]: Math.max(0, curWP - 1) });
-        fireWillWhisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
-        const ownerIds = Array.isArray(actor.getOwnerUserIDs) ? actor.getOwnerUserIDs() : [];
-        for (const uid of ownerIds) if (!fireWillWhisper.includes(uid)) fireWillWhisper.push(uid);
+        fireWillWhisper = resourceAudience(actor);
     }
 
     let resultText = "";
@@ -1137,6 +1176,9 @@ async function executeFirearmAttack(tab, getActor) {
     else if (netSucc === 0) resultText = `<div style="color: #7f8c8d; font-weight: bold; margin-top: 5px;">ПРОМАХ</div>`;
     else resultText = `<div style="color: #2e6b4e; font-weight: bold; margin-top: 5px;">Успехи: ${netSucc}</div>`;
 
+    // Пункт 2 (v2.0.3): отдельное сообщение «промахивается» больше не создаётся —
+    // фраза про промах уже показана под кубами (строка ПРОМАХ / ПРОВАЛ вместо
+    // числа успехов), поэтому второе дублирующее сообщение убрано.
     const attackHtml = await renderTemplate(`modules/${MODULE_ID}/templates/chat-fire-attack.html`, {
         actorName: escapeHtml(actor.name),
         weaponName: escapeHtml(weapon.name),
@@ -1148,20 +1190,17 @@ async function executeFirearmAttack(tab, getActor) {
     });
 
     const chatData = { speaker: ChatMessage.getSpeaker({ actor }), content: attackHtml };
-    // Скрытный бросок: сообщение видит ТОЛЬКО GM (автор — нет, в этом смысл скрытности).
-    if (isBlind) { chatData.blind = true; chatData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id); }
+    // Пункт 1/4: скрытный бросок — сообщение видят мастера и сам кидающий.
+    if (isBlind) { chatData.blind = true; chatData.whisper = blindAudience(); }
     else if (fireWillWhisper) {
         // Пункт 4 (согласовано): карточка со списанием Воли видна только владельцу актёра и мастерам.
         chatData.whisper = fireWillWhisper;
     }
     await ChatMessage.create(chatData);
 
-    // Пункт 8 (согласовано): при нулевых успехах атаки — отдельная строка в чате.
-    if (netSucc <= 0) {
-        const missShotData = { speaker: ChatMessage.getSpeaker({ actor }), content: `<p><strong>${escapeHtml(actor.name)}</strong> промахивается.</p>` };
-        if (isBlind) { missShotData.blind = true; missShotData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id); }
-        await ChatMessage.create(missShotData);
-    }
+    // Пункт 2 (v2.0.3): отдельное сообщение «промахивается» убрано — при нулевых
+    // успехах во вкладке Огонь фраза о промахе уже в основной карточке атаки
+    // (строка ПРОМАХ / ПРОВАЛ вместо числа успехов).
 
     if (netSucc > 0) {
         setTimeout(() => openDamageDialog(actor, weapon, netSucc, damageType, isBlind), 600);
@@ -1232,7 +1271,7 @@ async function openDamageDialog(actor, weapon, attackSuccesses, damageType, isBl
                     const netAttackSucc = attackSuccesses - defenseSucc;
                     if (netAttackSucc <= 0) {
                         const missData = { speaker: ChatMessage.getSpeaker({ actor }), content: `<p><strong>${escapeHtml(actor.name)}</strong> промахивается! Цель успешно защитилась (Защита: ${defenseSucc} >= Атака: ${attackSuccesses}).</p>` };
-                        if (isBlindAttack) { missData.blind = true; missData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id); }
+                        if (isBlindAttack) { missData.blind = true; missData.whisper = blindAudience(); }
                         return ChatMessage.create(missData);
                     }
 
@@ -1246,9 +1285,9 @@ async function openDamageDialog(actor, weapon, attackSuccesses, damageType, isBl
                     await dmgRoll.evaluate();
                     // Кубы Dice3D летят ВСЕГДА, в том числе при скрытной атаке
                     // (show() молча возвращает false для blind-сообщений — используем showForRoll напрямую).
-                    // При скрытной атаке кубы скрыты ото всех, кроме мастера (GM).
+                    // При скрытной атаке кубы видят только мастера и сам кидающий.
                     if (game.dice3d) {
-                        const dmgWhisperIds = isBlindAttack ? ChatMessage.getWhisperRecipients("GM").map(u => u.id) : undefined;
+                        const dmgWhisperIds = isBlindAttack ? blindAudience() : undefined;
                         await game.dice3d.showForRoll(dmgRoll, game.user, true, dmgWhisperIds, isBlindAttack);
                     }
 
@@ -1277,7 +1316,7 @@ async function openDamageDialog(actor, weapon, attackSuccesses, damageType, isBl
                     });
 
                     const dmgChatData = { speaker: ChatMessage.getSpeaker({ actor }), content: damageHtml };
-                    if (isBlindAttack) { dmgChatData.blind = true; dmgChatData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id); }
+                    if (isBlindAttack) { dmgChatData.blind = true; dmgChatData.whisper = blindAudience(); }
                     await ChatMessage.create(dmgChatData);
 
                 } catch (e) {
