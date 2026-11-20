@@ -205,23 +205,18 @@ function makeChatAudience({ actor = null, isBlind = false, forcePrivate = false 
 const _statusInfoCooldown = new Map();
 
 // ==========================================
-// АНИМАЦИЯ КУБОВ (v2.0.9, вариант А по согласованию)
+// АНИМАЦИЯ КУБОВ (v2.0.10, финальная схема по согласованию)
 //   Единая точка показа 3D-кубов: дисциплины, выстрел, урон.
-//   Если установлен и активен Dice So Nice! — анимацию берёт на себя он
-//   (в т.ч. через встроенный ролл сообщения), наша ручная анимация пропускается,
-//   чтобы кубы не летели дважды. Если DSN нет/выключен — показываем кубы сами.
+//   Схема: ролл передаётся ВСТРОЕННО в сообщение чата (chatData.rolls=[roll]) —
+//   Foundry и Dice So Nice! анимируют его ОДИН РАЗ автоматически. Поэтому
+//   ручная анимация game.dice3d.showForRoll больше НЕ вызывается нигде
+//   (в v2.0.9 из-за неверной проверки «DSN анимирует сам» кубы пропали совсем).
+//   Функция оставлена как no-op-хелпер для обратной совместимости вызовов.
 // ==========================================
-async function showDice3dOnce(roll, actor, isBlind) {
-    if (!roll || !game.dice3d) return; // модуля кубиков (Dice So Nice / Dice3D API) нет — ничего не делаем
-    const dsnActive = !!game.modules.get("dice-so-nice")?.active;
-    if (dsnActive) return; // DNS сам анимирует бросок — ручной показ пропускаем (иначе кубы летят дважды)
-    try {
-        const flavorUser = ChatMessage.getSpeaker({ actor }).user || game.user;
-        const whisperIds = isBlind ? buildResourceAudience(actor, true).whisper : undefined;
-        await game.dice3d.showForRoll(roll, flavorUser, true, whisperIds, isBlind && !game.user.isGM);
-    } catch (e) {
-        console.warn("WoD Panel | не удалось показать кубы:", e);
-    }
+async function showDice3dOnce(/* roll, actor, isBlind */) {
+    // Намеренно пусто: единственная анимация — встроенный ролл сообщения чата.
+    // Двойных кубов больше нет, потому что rolls добавляется ровно один раз,
+    // а явного showForRoll в коде не осталось.
 }
 
 function statusInfo(key, message) {
@@ -1065,13 +1060,13 @@ async function executeDiscipline(html) {
     //     видели карточку силы (строка «Потрачено N ...» внутри неё);
     //     при снятой галке «Скрытный» шёпот больше НЕ подставляется.
     Object.assign(chatData, makeChatAudience({ actor, isBlind, forcePrivate: isBlind }));
-    // Исправление v2.0.9 (комментарий про двойные кубы): раньше сюда подмешивалось
-    // chatData.rolls = [roll] — Foundry встраивает ролл в сообщение, а Dice So Nice!
-    // автоматически анимирует любой ролл внутри сообщения чата. Плюс наш собственный
-    // вызов game.dice3d.showForRoll выше — итого кубы летели ДВАЖДЫ. Теперь rolls НЕ
-    // передаём: единственная анимация — явный showForRoll (см. helper ниже).
-    // ВНИМАНИЕ: при скрытном броске непися мастер может увидеть всплывающую
-    // формулу "Nd10" в карточке сообщения — это ожидаемое поведение (кубы-то летят).
+    // v2.0.10 (итог истории с кубами): возвращён встроенный ролл в сообщение —
+    // chatData.rolls = [roll]. Foundry/Dice So Nice! анимируют его ОДИН РАЗ
+    // автоматически; явного game.dice3d.showForRoll в коде больше нет (showDice3dOnce
+    // — no-op), поэтому двойных кубов, как было в v2.0.8, тоже не возникает.
+    // В v2.0.9 мы убрали rolls И оставили проверку «если DSN активен — не показывать»,
+    // но DSN без rolls анимировать нечего → кубы пропали совсем. Теперь схема верна.
+    if (roll) chatData.rolls = [roll];
 
     ChatMessage.create(chatData);
 }
@@ -1321,6 +1316,9 @@ async function executeFirearmAttack(tab, getActor) {
     // выглядел скрытым. Теперь шёпот ставится ТОЛЬКО когда галка «Скрытный»
     // включена; открытый выстрел (в т.ч. с тратой Воли) — публичный.
     Object.assign(chatData, makeChatAudience({ actor, isBlind }));
+    // v2.0.10: встроенный ролл в сообщении — единственная анимация кубов
+    // (Foundry/DSN анимируют автоматически; явного showForRoll больше нет).
+    chatData.rolls = [roll];
     await ChatMessage.create(chatData);
 
     // Пункт 8 (согласовано): при нулевых успехах атаки — отдельная строка в чате.
@@ -1444,6 +1442,8 @@ async function openDamageDialog(actor, weapon, attackSuccesses, damageType, isBl
 
                     const dmgChatData = { speaker: ChatMessage.getSpeaker({ actor }), content: damageHtml };
                     Object.assign(dmgChatData, makeChatAudience({ actor, isBlind: isBlindAttack }));
+                    // v2.0.10: встроенный ролл урона — единственная анимация кубов.
+                    dmgChatData.rolls = [dmgRoll];
                     await ChatMessage.create(dmgChatData);
 
                 } catch (e) {
