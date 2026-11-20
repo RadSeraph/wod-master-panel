@@ -8,6 +8,7 @@
 // ВЕРСИЯ 3.1: слит с модулем wod-firearms-test (стрельба) — логика ран общая
 // (материнская панель первична), стрельба стала вкладкой «Огонь» основного
 // пульта, ромбовидное меню получило четвёртую кнопку.
+// Релизная версия модуля: 2.0.6 (см. module.json и Changelog в README.md).
 // ==========================================
 
 const MODULE_ID = "wod-master-panel";
@@ -138,12 +139,16 @@ function getActorOwnerUserIds(actor) {
     if (!actor) return [];
     try {
         // Основной способ: список пользователей-владельцев актёра (V10+).
-        if (typeof actor.owners !== "undefined") {
-            for (const u of (actor.owners || [])) if (u?.id) ids.add(u.id);
-        } else if (typeof actor.getUserLevel === "function") {
-            // Фолбэк для старых версий Foundry.
+        if (typeof actor.owners !== "undefined" && actor.owners) {
+            for (const u of actor.owners) if (u?.id) ids.add(u.id);
+        } else if (typeof actor.testUserPermission === "function") {
+            // Фолбэк, если actor.owners недоступен: явная проверка прав на каждого
+            // пользователя. Используется testUserPermission (стабилен в V10–V14),
+            // а не CONST.* — константы разрешений в разных сборках Foundry
+            // переименовывались и это роняло пульт с ошибкой вида
+            // "can't access property \"OWNER\" ... is undefined".
             for (const u of game.users.contents) {
-                if (actor.getUserLevel(u) >= CONST.USER_PERMISSIONS.OWNER) ids.add(u.id);
+                if (actor.testUserPermission(u, "OWNER")) ids.add(u.id);
             }
         }
     } catch (e) {
@@ -686,6 +691,13 @@ async function processHealthAction(html, type, value, useBlood, npcId, players) 
             } else {
                 ui.notifications.warn(`${actor.name}: нет поля Крови!`); canUpdate = false;
             }
+        } else if (bloodCost > 0 && !useBlood) {
+            // Исправление v2.0.6: раньше при снятой галке «Тратить Кровь на
+            // лечение» списание крови молча пропускалось, но в чат уходило
+            // сообщение с реальными дельтами — казалось, что лечил бесплатно.
+            // Теперь лечение без затрат Крови невозможно: действие блокируется.
+            ui.notifications.warn(`${actor.name}: включите «Тратить Кровь на лечение» — лечение без затрат Крови невозможно.`);
+            canUpdate = false;
         }
         if (canUpdate && (b !== current.bashing || l !== current.lethal || a !== current.aggravated)) {
             await actor.update({ [`${CONFIG.healthPath}.bashing`]: b, [`${CONFIG.healthPath}.lethal`]: l, [`${CONFIG.healthPath}.aggravated`]: a });
@@ -810,7 +822,19 @@ async function executeDiscipline(html) {
     const power = actor.items.get(powerId); if (!power) return;
 
     const customDifficulty = Number(html.find('#disc-difficulty').val()) || 6;
-    const useSpeciality = html.find('#disc-use-spec').is(':checked');
+    const useSpeciality = html.find('#disc-use-spec').is(':checked') && (() => {
+        // Пункт 3 ТЗ (v2.0.6): галка «Специализация» больше не может заблокировать
+        // дисциплину. Если у выбранного навыка нет заполненной speciality, галка
+        // снимается в момент броска и бросок проходит как обычный (без двойных
+        // десятков), а не прерывается с ошибкой.
+        const sk = power.system.dice2;
+        const sf = sk ? foundry.utils.getProperty(actor, `system.abilities.${sk}.speciality`) : "";
+        if (!sf || String(sf).trim() === "") {
+            html.find('#disc-use-spec').prop('checked', false);
+            return false;
+        }
+        return true;
+    })();
     const useWillpower = html.find('#disc-use-will').is(':checked');
     const isBlind = html.find('#disc-blind-roll').is(':checked');
     const manualBonus = Number(html.find('#disc-manual-bonus').val()) || 0;
