@@ -194,9 +194,9 @@ function ownerUserIds(actor) {
     if (typeof actor.getOwnerUserIDs === "function") {
         ids = actor.getOwnerUserIDs() || [];
     } else if (actor.permissions) {
-        ids = Object.entries(actor.permissions).filter(([, lvl]) => lvl >= CONST.ENTITY_PERMISSIONS.OWNER).map(([uid]) => uid);
+        ids = Object.entries(actor.permissions).filter(([, lvl]) => lvl >= CONST.PERMISSIONS.OWNER).map(([uid]) => uid);
     } else if (actor.ownership) {
-        ids = Object.entries(actor.ownership).filter(([uid, lvl]) => uid !== "default" && lvl >= CONST.ENTITY_PERMISSIONS.OWNER).map(([uid]) => uid);
+        ids = Object.entries(actor.ownership).filter(([uid, lvl]) => uid !== "default" && lvl >= CONST.PERMISSIONS.OWNER).map(([uid]) => uid);
     }
     return ids.filter(uid => !game.users.get(uid)?.isGM);
 }
