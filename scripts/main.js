@@ -119,6 +119,56 @@ function escapeHtml(str) {
     })[c]);
 }
 
+// ==========================================
+// АУДИТОРИЯ СООБЩЕНИЙ В ЧАТЕ (v2.0.5, пункт 2 ТЗ)
+//   • Игрок действует со своего пульта (ресурсы/здоровье своего персонажа) —
+//     сообщение видят он и мастер.
+//   • Мастер действует с панели игрока — аналогично: мастер и игрок-владелец.
+//   • Мастер работает с ресурсами неписей — видит только мастер.
+// Исправление v2.0.5: старая проверка `Array.isArray(actor.getOwnerUserIDs)`
+// всегда давала false (это метод, а не массив), из-за чего владелец актёра НЕ
+// попадал в список получателей шёпота — игрок не видел собственные трат Крови,
+// Воли и изменения здоровья. Плюс серверная сборка 2.0.5 использовала удалённый
+// в Foundry V13+ API CONST.ENTITY_PERMISSIONS, что роняло обработку здоровья
+// (TypeError: can't access property "OWNER" ...). Теперь владельцы определяются
+// через actor.owners / testUserPermission — оба способа совместимы с V13/V14.
+// ==========================================
+function getActorOwnerUserIds(actor) {
+    const ids = new Set();
+    if (!actor) return [];
+    try {
+        // Основной способ: список пользователей-владельцев актёра (V10+).
+        if (typeof actor.owners !== "undefined") {
+            for (const u of (actor.owners || [])) if (u?.id) ids.add(u.id);
+        } else if (typeof actor.getUserLevel === "function") {
+            // Фолбэк для старых версий Foundry.
+            for (const u of game.users.contents) {
+                if (actor.getUserLevel(u) >= CONST.USER_PERMISSIONS.OWNER) ids.add(u.id);
+            }
+        }
+    } catch (e) {
+        console.warn("WoD Panel | не удалось получить владельцев актёра:", e);
+    }
+    return [...ids];
+}
+
+function buildResourceAudience(actor, isBlind = false) {
+    // Базовая аудитория — мастера.
+    const whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
+    // Скрытый бросок: результат видит ТОЛЬКО мастер (автор — нет, в этом смысл скрытности).
+    if (isBlind) return { whisper, blind: true };
+    // Если действие выполняет не мастер — он должен видеть собственное сообщение.
+    if (!game.user.isGM && !whisper.includes(game.user.id)) whisper.push(game.user.id);
+    // Добавляем владельца актёра (если это НПЦ, у которого нет игрока-владельца,
+    // список пуст — сообщение увидит только мастер, как требует пункт 2 ТЗ).
+    if (actor) {
+        for (const uid of getActorOwnerUserIds(actor)) {
+            if (!whisper.includes(uid)) whisper.push(uid);
+        }
+    }
+    return { whisper, blind: false };
+}
+
 // Синие информационные уведомления «всё в порядке» с кулдауном 3 секунды
 // на каждое сочетание (тип шкалы + имя актёра), чтобы частые клики не спамили.
 const _statusInfoCooldown = new Map();
@@ -445,15 +495,26 @@ function setupPanelLogic(html, isGM) {
         html.find('#disc-description').html(attrInfoHTML + descHTML);
 
         const skillKey = power.system.dice2;
+        // Пункт 3 ТЗ (v2.0.5): сохранение выбора специализации. Раньше чекбокс
+        // принудительно сбрасывался при каждой перерисовке блока (смена сложности,
+        // галки «игнорировать штрафы» и т.п.) — пользователь ставил галку, она
+        // исчезала, и бросок уходил без двойных десятков. Теперь состояние
+        // сохраняется: сброс только при смене силы или персонажа.
+        let specAvailable = false;
         if (skillKey) {
             const skill = foundry.utils.getProperty(actor, `system.abilities.${skillKey}`);
-            if (skill && skill.speciality && skill.speciality.trim() !== "") {
+            specAvailable = !!(skill && skill.speciality && skill.speciality.trim() !== "");
+            if (specAvailable) {
                 html.find('#disc-spec-name').text(skill.speciality); html.find('#disc-spec-block').show();
             } else { html.find('#disc-spec-block').hide(); }
         } else { html.find('#disc-spec-block').hide(); }
-        html.find('#disc-use-spec').prop('checked', false);
+        if (!specAvailable) html.find('#disc-use-spec').prop('checked', false);
         updateFinalDiscCost(actor, power);
     };
+
+    // Сброс чекбокса специализации — только при реальной смене силы/персонажа
+    // (updatePowerDetails вызывается из обработчиков change селекта силы ниже).
+    const resetSpecialityCheckbox = () => html.find('#disc-use-spec').prop('checked', false);
 
     const updateFinalDiscCost = (actor, power) => {
         const textToScan = ((power.system.description || "") + " " + (power.system.details || "")).toLowerCase();
@@ -497,9 +558,14 @@ function setupPanelLogic(html, isGM) {
         else html.find('#disc-final-cost').html(`Итоговая стоимость: <span style="color: #2e6b4e;">Нет</span>`);
     };
 
-    if (isGM) html.find('#disc-npc-select').change(updateDiscUI);
-    else html.find('#disc-actor-select').change(updateDiscUI);
-    html.find('#disc-power-select').change(updatePowerDetails);
+    if (isGM) html.find('#disc-npc-select').change(() => { resetSpecialityCheckbox(); updateDiscUI(); });
+    else html.find('#disc-actor-select').change(() => { resetSpecialityCheckbox(); updateDiscUI(); });
+    html.find('#disc-power-select').change(() => { resetSpecialityCheckbox(); updatePowerDetails(); });
+    // Пункт 3 ТЗ: чекбокс специализации больше не «живёт» без обработчика —
+    // галка остаётся установленной до броска (сброс только при смене силы/персонажа).
+    html.find('#disc-use-spec').change(function() {
+        $(this).prop('checked', $(this).is(':checked'));
+    });
     html.find('#disc-use-will').change(() => {
         let actorId = isGM ? html.find('#disc-npc-select').val() : html.find('#disc-actor-select').val();
         const actor = game.actors.get(actorId);
@@ -601,7 +667,11 @@ async function processHealthAction(html, type, value, useBlood, npcId, players) 
             if (type === "bashing")      { hb = Math.min(b, h); b -= hb; }
             else if (type === "lethal")  { hl = Math.min(l, h); l -= hl; }
             else if (type === "aggravated") { ha = Math.min(a, h); a -= ha; }
-            bloodCost = (hl + ha) * 5; // летальный и аггравированный лечатся кровью (5 кр/ячейка)
+            // Пункт 1 ТЗ (стоимость лечения Кровью, как в родительских версиях):
+            //   • дробящий (bashing)    — бесплатно;
+            //   • летальный (lethal)    — 1 Кровь за ячейку;
+            //   • аггравированный (agg.)— 5 Кровей за ячейку.
+            bloodCost = hl * 1 + ha * 5;
             // Защита от ухода в минус (например, если в данных остались значения > 7
             // со старых версий модуля).
             b = Math.max(0, b); l = Math.max(0, l); a = Math.max(0, a);
@@ -650,9 +720,10 @@ async function processHealthAction(html, type, value, useBlood, npcId, players) 
 
         let chatData = { speaker: ChatMessage.getSpeaker(), content: `<p><strong>${escapeHtml(targetName)}</strong> ${actionText} урон ${changedAmount} (${namesMap[type]})${bloodText}.</p>` };
 
-        let whisperTargets = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
-        if (!game.user.isGM) whisperTargets.push(game.user.id);
-        chatData.whisper = whisperTargets;
+        // Пункт 2 ТЗ: игрок и мастер (владелец актёра) видят сообщение,
+        // при работе мастера с неписями — только мастера.
+        const audience = buildResourceAudience(targets.filter(Boolean)[0]);
+        chatData.whisper = audience.whisper;
 
         ChatMessage.create(chatData);
     }
@@ -719,9 +790,10 @@ async function processResourceAction(html, type, value, npcId, players) {
             content: `<p>${messageParts.join('<br>')}</p>`
         };
 
-        let whisperTargets = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
-        if (!game.user.isGM) whisperTargets.push(game.user.id);
-        chatData.whisper = whisperTargets;
+        // Пункт 2 ТЗ: траты/восстановление Крови и Воли видят игрок-владелец
+        // и мастер; при работе мастера с неписями — только мастер.
+        const audience = buildResourceAudience(targets.filter(Boolean)[0]);
+        chatData.whisper = audience.whisper;
 
         ChatMessage.create(chatData);
     }
@@ -777,13 +849,14 @@ async function executeDiscipline(html) {
     }
 
     let resourceHTML = "";
-    // Пункт 4 (согласовано, v2.0.2): трата ресурсов (Кровь/Воля) видна только
-    // владельцу актёра и мастеру — остальные игроки не видят ни трату, ни остаток.
-    let resourceWhisper = null;
+    // Пункт 2/4 ТЗ (v2.0.5): трата ресурсов (Кровь/Воля) видна игроку-владельцу
+    // и мастеру; при работе мастера с неписями — только мастеру. Исправлен баг:
+    // старая проверка Array.isArray(actor.getOwnerUserIDs) всегда давала false,
+    // из-за чего владелец не получал сообщение, а при нулевой Воле дисциплина
+    // блокировалась ещё до списания.
+    let resourceAudience = null;
     if (finalBlood > 0 || finalWill > 0) {
-        resourceWhisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
-        const ownerIds = Array.isArray(actor.getOwnerUserIDs) ? actor.getOwnerUserIDs() : [];
-        for (const uid of ownerIds) if (!resourceWhisper.includes(uid)) resourceWhisper.push(uid);
+        resourceAudience = buildResourceAudience(actor, isBlind);
     }
     if (finalBlood > 0) {
         const curB = Number(foundry.utils.getProperty(actor, CONFIG.bloodPath));
@@ -820,6 +893,12 @@ async function executeDiscipline(html) {
 
         const pool = Math.max(0, attrValue + skillValue + manualBonus + woundPenalty);
 
+        // Пункт 3 ТЗ (v2.0.5): если специализация реально не применима (у навыка
+        // нет заполненного поля speciality), галка игнорируется — бросок проходит
+        // как обычный, а не блокируется и не даёт ложных «двойных десятков».
+        const specField = skillKey ? foundry.utils.getProperty(actor, `system.abilities.${skillKey}.speciality`) : "";
+        const effectiveSpeciality = useSpeciality && !!(specField && String(specField).trim() !== "");
+
         if (pool > 0) {
             roll = new Roll(`${pool}d10`);
             await roll.evaluate();
@@ -837,8 +916,8 @@ async function executeDiscipline(html) {
             for (let die of roll.dice[0].results) {
                 let resType = 'neutral';
                 if (die.result >= customDifficulty) {
-                    succ += (die.result === 10 && useSpeciality) ? 2 : 1;
-                    resType = (die.result === 10 && useSpeciality) ? 'spec' : 'success';
+                    succ += (die.result === 10 && effectiveSpeciality) ? 2 : 1;
+                    resType = (die.result === 10 && effectiveSpeciality) ? 'spec' : 'success';
                 }
                 if (die.result === 1) {
                     ones++;
@@ -903,11 +982,11 @@ async function executeDiscipline(html) {
         // Скрытный бросок: результат видит ТОЛЬКО GM (автор — нет, в этом смысл скрытности).
         chatData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
         if (roll) chatData.rolls = [roll];
-    } else if (resourceWhisper && resourceHTML) {
-        // Пункт 4 (согласовано): строки «Потрачено N ... (осталось M)» не должны
-        // показывать чужие остатки другим игрокам — всё сообщение шепчем
-        // владельцу актёра и мастерам. Формат текста при этом не меняется.
-        chatData.whisper = resourceWhisper;
+    } else if (resourceAudience && resourceHTML) {
+        // Пункт 2/4 ТЗ (v2.0.5): строки «Потрачено N ... (осталось M)» видят
+        // игрок-владелец и мастера (для неписей — только мастер). Исправлен баг
+        // getOwnerUserIDs — теперь владелец гарантированно получает сообщение.
+        chatData.whisper = resourceAudience.whisper;
     }
 
     ChatMessage.create(chatData);
@@ -1112,8 +1191,12 @@ async function executeFirearmAttack(tab, getActor) {
 
     let netSucc = Math.max(0, rawSucc - ones);
     let willText = "";
-    // Пункт 4 (согласовано): списание Воли за выстрел — только владелец актёра и мастера.
-    let fireWillWhisper = null;
+    // Пункт 2/4 ТЗ (v2.0.5): списание Воли за выстрел — видно игроку-владельцу
+    // и мастерам; для неписей — только мастеру. Исправлен баг: старая проверка
+    // Array.isArray(actor.getOwnerUserIDs) всегда давала false (это метод),
+    // из-за чего игрок не видел ни карточку выстрела с тратой Воли, ни результат.
+    let fireWillAudience = null;
+    let willResourceHTML = "";
 
     if (useWill) {
         // Столовое правило этого модуля: Воля — это ВСЕГДА +1 успех,
@@ -1127,9 +1210,10 @@ async function executeFirearmAttack(tab, getActor) {
             : "";
         const curWP = Number(foundry.utils.getProperty(actor, CONFIG.willPath)) || 0;
         await actor.update({ [CONFIG.willPath]: Math.max(0, curWP - 1) });
-        fireWillWhisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id);
-        const ownerIds = Array.isArray(actor.getOwnerUserIDs) ? actor.getOwnerUserIDs() : [];
-        for (const uid of ownerIds) if (!fireWillWhisper.includes(uid)) fireWillWhisper.push(uid);
+        // Пункт 4 ТЗ (v2.0.5): трата Воли при выстреле теперь видна в чате —
+        // строка в родительском формате «Потрачено N Воли (осталось M)».
+        willResourceHTML = `<p style="color: #00008b; margin: 2px 0;"><em>Потрачено 1 Воли (осталось ${Math.max(0, curWP - 1)}).</em></p>`;
+        fireWillAudience = buildResourceAudience(actor, isBlind);
     }
 
     let resultText = "";
@@ -1143,16 +1227,17 @@ async function executeFirearmAttack(tab, getActor) {
         pool: `${attrKey} (${attrVal}) + ${abilityKey} (${abilityVal})${accuracy ? ` + Acc (${accuracy})` : ''}${config.bonus ? ` + Режим (${config.bonus})` : ''}${woundPenalty ? ` Штраф ран: ${woundStateName} (${woundPenalty})` : ''}${manualBonus ? ` + Вручную (${manualBonus})` : ''} = ${finalPool}`,
         difficulty: finalDiff,
         // Текст с расчётами убран — остаётся только строка под кубами (по согласованию).
-        successesSummary: "",
+        successesSummary: willResourceHTML,
         diceHTML: diceHTML + resultText + willText
     });
 
     const chatData = { speaker: ChatMessage.getSpeaker({ actor }), content: attackHtml };
     // Скрытный бросок: сообщение видит ТОЛЬКО GM (автор — нет, в этом смысл скрытности).
     if (isBlind) { chatData.blind = true; chatData.whisper = ChatMessage.getWhisperRecipients("GM").map(u => u.id); }
-    else if (fireWillWhisper) {
-        // Пункт 4 (согласовано): карточка со списанием Воли видна только владельцу актёра и мастерам.
-        chatData.whisper = fireWillWhisper;
+    else if (fireWillAudience) {
+        // Пункт 2/4 ТЗ (v2.0.5): карточка со списанием Воли видна игроку-владельцу
+        // и мастерам (для неписей — только мастеру). Исправлен баг getOwnerUserIDs.
+        chatData.whisper = fireWillAudience.whisper;
     }
     await ChatMessage.create(chatData);
 
