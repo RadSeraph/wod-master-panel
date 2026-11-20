@@ -782,16 +782,16 @@ async function executeDiscipline(html) {
         if (isNaN(curB)) return ui.notifications.error(`${actor.name}: нет пула Крови!`);
         if (curB < finalBlood) return ui.notifications.error(`${actor.name}: мало Крови!`);
         await actor.update({ [CONFIG.bloodPath]: curB - finalBlood });
-        // Формат по согласованию: «Имя тратит N Крови. Остаток: M» (как в родителе).
-        resourceHTML += `<p style="color: #8b0000; margin: 2px 0;"><em>${escapeHtml(actor.name)} тратит ${finalBlood} Крови. Остаток: ${curB - finalBlood}</em></p>`;
+        // Формат родителя (tessst): «Потрачено N Крови (осталось M).»
+        resourceHTML += `<p style="color: #8b0000; margin: 2px 0;"><em>Потрачено ${finalBlood} Крови (осталось ${curB - finalBlood}).</em></p>`;
     }
     if (finalWill > 0) {
         const curW = Number(foundry.utils.getProperty(actor, CONFIG.willPath));
         if (isNaN(curW)) return ui.notifications.error(`${actor.name}: нет пула Воли!`);
         if (curW < finalWill) return ui.notifications.error(`${actor.name}: мало Воли!`);
         await actor.update({ [CONFIG.willPath]: curW - finalWill });
-        // Формат по согласованию: «Имя тратит N Воли. Остаток: M» (как в родителе).
-        resourceHTML += `<p style="color: #00008b; margin: 2px 0;"><em>${escapeHtml(actor.name)} тратит ${finalWill} Воли. Остаток: ${curW - finalWill}</em></p>`;
+        // Формат родителя (tessst): «Потрачено N Воли (осталось M).»
+        resourceHTML += `<p style="color: #00008b; margin: 2px 0;"><em>Потрачено ${finalWill} Воли (осталось ${curW - finalWill}).</em></p>`;
     }
 
     let rollHTML = "";
@@ -850,7 +850,8 @@ async function executeDiscipline(html) {
                 // Надпись про сильную волю: если успех появился лишь благодаря Воли
                 // (кубы сами по себе не дали ничего) — как в тестовом модуле (п.6).
                 resultTextHTML = (netFromDice === 0)
-                    ? `<div style="margin-top: 4px; font-size: 0.9em; font-style: italic; color: #00008b;">Лишь сильная воля помогает преодолеть трудности!</div>`
+                    ? `<div style="margin-top: 8px; font-size: 1.2em; font-weight: bold; color: #2e6b4e;">Успехи: ${net}</div>
+                                      <div style="margin-top: 4px; font-size: 0.9em; font-style: italic; color: #00008b;">Лишь сильная воля помогает преодолеть трудности!</div>`
                     : `<div style="margin-top: 8px; font-size: 1.2em; font-weight: bold; color: #2e6b4e;">Успехи: ${net} <span style="font-size: 0.8em; color: #00008b;">(включая +1 от Воли)</span></div>`;
             } else {
                 if (succ === 0 && ones > 0) {
