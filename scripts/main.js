@@ -782,15 +782,16 @@ async function executeDiscipline(html) {
         if (isNaN(curB)) return ui.notifications.error(`${actor.name}: нет пула Крови!`);
         if (curB < finalBlood) return ui.notifications.error(`${actor.name}: мало Крови!`);
         await actor.update({ [CONFIG.bloodPath]: curB - finalBlood });
-        // По согласованию (v1.4.4): остаток ресурса в чате не указываем — только объём списания.
-        resourceHTML += `<p style="color: #8b0000; margin: 2px 0;"><em>${escapeHtml(actor.name)}: Кровь −${finalBlood}</em></p>`;
+        // Формат по согласованию: «Имя тратит N Крови. Остаток: M» (как в родителе).
+        resourceHTML += `<p style="color: #8b0000; margin: 2px 0;"><em>${escapeHtml(actor.name)} тратит ${finalBlood} Крови. Остаток: ${curB - finalBlood}</em></p>`;
     }
     if (finalWill > 0) {
         const curW = Number(foundry.utils.getProperty(actor, CONFIG.willPath));
         if (isNaN(curW)) return ui.notifications.error(`${actor.name}: нет пула Воли!`);
         if (curW < finalWill) return ui.notifications.error(`${actor.name}: мало Воли!`);
         await actor.update({ [CONFIG.willPath]: curW - finalWill });
-        resourceHTML += `<p style="color: #00008b; margin: 2px 0;"><em>${escapeHtml(actor.name)}: Воля −${finalWill}</em></p>`;
+        // Формат по согласованию: «Имя тратит N Воли. Остаток: M» (как в родителе).
+        resourceHTML += `<p style="color: #00008b; margin: 2px 0;"><em>${escapeHtml(actor.name)} тратит ${finalWill} Воли. Остаток: ${curW - finalWill}</em></p>`;
     }
 
     let rollHTML = "";
@@ -816,10 +817,9 @@ async function executeDiscipline(html) {
             await roll.evaluate();
 
             // Кубы Dice3D летят ВСЕГДА (исправление: при скрытном броске кубы не пропадали).
-            // П.4: при скрытном броске кубы НЕ должны быть видны кидающему —
-            // showForRoll с whisper = null и hide = true скрывает анимацию у всех,
-            // включая автора броска.
-            const discWhisperIds = isBlind ? null : undefined;
+            // При скрытном броске кубы скрыты ото всех, кроме мастера (GM):
+            // whisper = список ГМ, hide = true (кидающий-игрок кубов не видит).
+            const discWhisperIds = isBlind ? ChatMessage.getWhisperRecipients("GM").map(u => u.id) : undefined;
             if (game.dice3d) {
                 await game.dice3d.showForRoll(roll, game.user, true, discWhisperIds, isBlind);
             }
@@ -1081,10 +1081,10 @@ async function executeFirearmAttack(tab, getActor) {
     await roll.evaluate();
     // Кубы Dice3D летят ВСЕГДА, в том числе при скрытном броске
     // (show() молча возвращает false для blind-сообщений — используем showForRoll напрямую).
-    // П.4: при скрытном броске кубы НЕ видны никому, включая кидающего
-    // (whisper = null, hide = true).
+    // При скрытном броске кубы скрыты ото всех, кроме мастера (GM).
     if (game.dice3d) {
-        await game.dice3d.showForRoll(roll, game.user, true, isBlind ? null : undefined, isBlind);
+        const fireWhisperIds = isBlind ? ChatMessage.getWhisperRecipients("GM").map(u => u.id) : undefined;
+        await game.dice3d.showForRoll(roll, game.user, true, fireWhisperIds, isBlind);
     }
 
     let rawSucc = 0, ones = 0, diceHTML = "";
@@ -1216,10 +1216,10 @@ async function openDamageDialog(actor, weapon, attackSuccesses, damageType, isBl
                     await dmgRoll.evaluate();
                     // Кубы Dice3D летят ВСЕГДА, в том числе при скрытной атаке
                     // (show() молча возвращает false для blind-сообщений — используем showForRoll напрямую).
-                    // П.4: при скрытной атаке кубы НЕ видны никому, включая кидающего
-                    // (whisper = null, hide = true).
+                    // При скрытной атаке кубы скрыты ото всех, кроме мастера (GM).
                     if (game.dice3d) {
-                        await game.dice3d.showForRoll(dmgRoll, game.user, true, isBlindAttack ? null : undefined, isBlindAttack);
+                        const dmgWhisperIds = isBlindAttack ? ChatMessage.getWhisperRecipients("GM").map(u => u.id) : undefined;
+                        await game.dice3d.showForRoll(dmgRoll, game.user, true, dmgWhisperIds, isBlindAttack);
                     }
 
                     let dmgSucc = 0, dmgOnes = 0, dmgDiceHTML = "";
@@ -1231,9 +1231,10 @@ async function openDamageDialog(actor, weapon, attackSuccesses, damageType, isBl
                         dmgDiceHTML += createDiceHTML(die.result, isSucc ? 'success' : (isOne ? 'fail' : 'neutral'));
                     }
 
-                    // Единицы вычитают успехи урона (п.3): как и в броске атаки
-                    // дисциплин (netFromDice = succ - ones). Итог не уходит в минус.
-                    dmgSucc = Math.max(0, dmgSucc - dmgOnes);
+                    // Единицы вычитают успехи урона: как и в броске атаки
+                    // дисциплин (netFromDice = succ - ones). Итог — минимум 1:
+                    // это «пол», а не прибавка (0 успехов = 1 урон, но не +1 к имеющимся).
+                    dmgSucc = Math.max(1, dmgSucc - dmgOnes);
 
                     const damageHtml = await renderTemplate(`modules/${MODULE_ID}/templates/chat-fire-damage.html`, {
                         actorName: escapeHtml(actor.name),
