@@ -515,7 +515,7 @@ function setupPanelLogic(html, isGM) {
                 </div>
                 <div style="margin-top: 5px; display: flex; align-items: center; gap: 5px;">
                     <label style="font-size: 0.9em;">Бонус/Штраф кубов:</label>
-                    <input type="number" id="disc-manual-bonus" value="0" style="width: 50px; padding: 2px;">
+                    <input type="number" id="disc-manual-bonus" value="${(() => { const prev = html.find('#disc-manual-bonus'); return prev.length ? escapeHtml(prev.val()) : "0"; })()}" style="width: 50px; padding: 2px;">
                 </div>
             `;
         }
@@ -720,12 +720,15 @@ async function processHealthAction(html, type, value, useBlood, npcId, players) 
                 ui.notifications.warn(`${actor.name}: нет поля Крови!`); canUpdate = false;
             }
         } else if (bloodCost > 0 && !useBlood) {
-            // Исправление v2.0.6: раньше при снятой галке «Тратить Кровь на
-            // лечение» списание крови молча пропускалось, но в чат уходило
-            // сообщение с реальными дельтами — казалось, что лечил бесплатно.
-            // Теперь лечение без затрат Крови невозможно: действие блокируется.
-            ui.notifications.warn(`${actor.name}: включите «Тратить Кровь на лечение» — лечение дробящего/летального (1 Кровь) и аггравированного (5 Кровей) урона без затрат Крови невозможно.`);
-            canUpdate = false;
+            // Исправление v2.0.8 (комментарий 1): галка «Тратить Кровь на
+            // лечение» работает как переключатель траты. При ВКЛЮЧЕННОЙ галке
+            // кровь тратится (дробящий/летальный — 1 Кровь за ячейку,
+            // аггравированный — 5). При ВЫКЛЮЧЕННОЙ галке лечение проходит
+            // БЕСПЛАТНО: кровь не списывается, totalBloodCost не растёт,
+            // в сообщении не будет строки «(потрачено N Крови)».
+            // Раньше (v2.0.7) снятая галка блокировала лечение вовсе — это
+            // противоречило смыслу переключателя.
+            bloodCost = 0;
         }
         if (canUpdate && (b !== current.bashing || l !== current.lethal || a !== current.aggravated)) {
             await actor.update({ [`${CONFIG.healthPath}.bashing`]: b, [`${CONFIG.healthPath}.lethal`]: l, [`${CONFIG.healthPath}.aggravated`]: a });
@@ -966,7 +969,16 @@ async function executeDiscipline(html) {
             // (раньше whisper = только ГМ, hide = true, и игрок-автор кубов не видел).
             const discWhisperIds = isBlind ? buildResourceAudience(actor, true).whisper : undefined;
             if (game.dice3d) {
-                await game.dice3d.showForRoll(roll, game.user, true, discWhisperIds, isBlind);
+                // Исправление v2.0.8 (комментарий 6): раньше при скрытном броске
+                // непися кубы не летели. Foundry/Dice3D молча подавляет показ
+                // кубов для blind-бросков, когда кидает сам ГМ (flavor-blind),
+                // а "кидающим" в showForRoll передавался game.user — тогда как
+                // реальным автором сообщения является ГМ-персонаж актёра.
+                // Теперь: rollMode "blind" только если кидает НЕ ГМ (игрок тянет
+                // скрытый бросок); для ГМ — обычный показ с шёпотом-аудиторией,
+                // чтобы кубы улетали и были видны мастеру и владельцу актёра.
+                const discFlavorUser = ChatMessage.getSpeaker({ actor }).user || game.user;
+                await game.dice3d.showForRoll(roll, discFlavorUser, true, discWhisperIds, isBlind && !game.user.isGM);
             }
 
             let succ = 0, ones = 0;
@@ -1233,7 +1245,11 @@ async function executeFirearmAttack(tab, getActor) {
     if (game.dice3d) {
         // Исправление v2.0.7 (комментарий 6): кубы скрытного выстрела видны и автору.
         const fireWhisperIds = isBlind ? buildResourceAudience(actor, true).whisper : undefined;
-        await game.dice3d.showForRoll(roll, game.user, true, fireWhisperIds, isBlind);
+        // Исправление v2.0.8 (комментарий 6): см. аналогичное место в дисциплинах —
+        // flavor-user берётся из спикера актёра, blind-режим кубов включается
+        // только когда скрытый бросок делает игрок (не ГМ).
+        const fireFlavorUser = ChatMessage.getSpeaker({ actor }).user || game.user;
+        await game.dice3d.showForRoll(roll, fireFlavorUser, true, fireWhisperIds, isBlind && !game.user.isGM);
     }
 
     let rawSucc = 0, ones = 0, diceHTML = "";
@@ -1390,7 +1406,9 @@ async function openDamageDialog(actor, weapon, attackSuccesses, damageType, isBl
                     if (game.dice3d) {
                         // Исправление v2.0.7 (комментарий 6): кубы скрытого урона видны и автору.
                         const dmgWhisperIds = isBlindAttack ? buildResourceAudience(actor, true).whisper : undefined;
-                        await game.dice3d.showForRoll(dmgRoll, game.user, true, dmgWhisperIds, isBlindAttack);
+                        // Исправление v2.0.8 (комментарий 6): то же для кубов урона.
+                        const dmgFlavorUser = ChatMessage.getSpeaker({ actor }).user || game.user;
+                        await game.dice3d.showForRoll(dmgRoll, dmgFlavorUser, true, dmgWhisperIds, isBlindAttack && !game.user.isGM);
                     }
 
                     let dmgSucc = 0, dmgOnes = 0, dmgDiceHTML = "";
