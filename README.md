@@ -10,4 +10,4 @@ He was the creator of the core system for Foundry VTT, which served as the inspi
 ## Warning
 
 I’m just an ordinary user, not a programmer or a coding expert. But I really love the World of Darkness, I drive a lot and play. So I’d like to contribute a bit of value to those who might find it useful. 
-I don’t know how to program, but I can stubbornly push the neural network. Please don’t hold it against me for using slave labor.
+I don’t know how to program, but I can stubbornly push the neural network. Please don’t hold it against me for using slave labor of AI.
